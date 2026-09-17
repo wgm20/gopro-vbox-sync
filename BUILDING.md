@@ -36,7 +36,7 @@ Source and binaries use the same version in `goprovbox/__init__.py` and `pyproje
 
 The GitHub Actions workflow tests each main-branch push and pull request. Pushing a version tag such as `v1.4.0b1` additionally builds and tests the installer, then creates a public **prerelease** with its assets. The tag must match the app version. No personal access token is stored: the release step uses the job's repository-scoped `GITHUB_TOKEN`. Release write permission is limited to the tag build job. Actions are pinned to reviewed commit hashes.
 
-Use the repository README and releases page as the public download page. A standalone `docs/index.html` landing page is supplied if you later enable GitHub Pages from the `main` branch's `/docs` directory. Publishing Pages is optional; download links already work through GitHub Releases.
+The public download page is [wgm20.github.io/gopro-vbox-sync](https://wgm20.github.io/gopro-vbox-sync/), served from `main`'s `/docs` directory by GitHub Pages. It links to the versioned GitHub release asset. Forks may enable Pages with the same branch/directory settings and update the repository URLs. GitHub Releases also works without Pages.
 
 Review the allowlist, diff and release assets before pushing. `Examples`, `scratch`, local validation records, local build tools, environments and recordings are excluded. Releases contain no Racelogic libraries, scene artwork or FFmpeg binaries. FFmpeg is downloaded separately by the user.
 
