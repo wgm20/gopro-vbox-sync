@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.4.0b5 — shortcut icon refresh
+
+- Desktop and Start menu shortcuts point directly to the Six 7 icon file, avoiding the old executable icon cached by Windows after an upgrade.
+
+App behaviour and video processing are unchanged.
+
 ## 1.4.0b4 — Help menu shortcuts
 
 - Adds Help → Download page for the latest public installer.

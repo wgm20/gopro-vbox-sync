@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.4.0b4"
+  #define AppVersion "1.4.0b5"
 #endif
 [Setup]
 AppId={{91BD245C-AF16-4BCB-95E5-0D9F2F294092}
@@ -36,9 +36,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "..\dist\GoProVBOXSync\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\GoPro VBOX Sync"; Filename: "{app}\GoProVBOXSync.exe"
+Name: "{group}\GoPro VBOX Sync"; Filename: "{app}\GoProVBOXSync.exe"; IconFilename: "{app}\_internal\goprovbox\assets\icon.ico"
 Name: "{group}\Quick-start guide"; Filename: "{app}\_internal\goprovbox\assets\quick-start.html"
-Name: "{autodesktop}\GoPro VBOX Sync"; Filename: "{app}\GoProVBOXSync.exe"; Tasks: desktopicon
+Name: "{autodesktop}\GoPro VBOX Sync"; Filename: "{app}\GoProVBOXSync.exe"; IconFilename: "{app}\_internal\goprovbox\assets\icon.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\GoProVBOXSync.exe"; Description: "Open GoPro VBOX Sync"; Flags: nowait postinstall skipifsilent
