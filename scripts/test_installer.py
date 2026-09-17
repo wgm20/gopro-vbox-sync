@@ -35,6 +35,7 @@ def main():
         raise RuntimeError(f"Installed app test failed; inspect {evidence}")
     report = json.loads((evidence / "self test/self-test.json").read_text())
     assert report["passed"] and report["frozen"]
+    assert report["uninstaller_available"], "The installed app must find its own uninstaller"
     # Verify the uninstaller removes only the installed app, preserving exports.
     result = subprocess.run([str(target / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], timeout=120)
     assert result.returncode == 0

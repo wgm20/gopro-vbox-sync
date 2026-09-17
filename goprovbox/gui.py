@@ -17,7 +17,8 @@ from PIL import Image, ImageTk
 from . import __version__
 from .engine import scan_folder, export
 from .media import preview
-from .distribution import asset, data_directory, tools_ready, download_tools, copy_demo, RELEASES, REPOSITORY
+from .distribution import (asset, data_directory, tools_ready, download_tools, copy_demo,
+                           uninstall_command, DOWNLOAD_PAGE, RELEASES, REPOSITORY)
 
 ROTATIONS = {"Upright — no rotation": 0, "90° clockwise": 90, "180°": 180, "90° anticlockwise": 270}
 QUALITY = {"HD · 1920 px": 1920, "Full resolution": 0, "Compact · 1280 px": 1280}
@@ -95,9 +96,13 @@ class App:
         help_menu.add_command(label="Try practice recordings", command=self.try_demo)
         help_menu.add_command(label="Set up video tools", command=self.setup_tools)
         help_menu.add_separator()
+        help_menu.add_command(label="Download page", command=self.open_download_page)
         help_menu.add_command(label="Check for updates", command=lambda: webbrowser.open(RELEASES))
         help_menu.add_command(label="Source code and support", command=lambda: webbrowser.open(REPOSITORY))
         help_menu.add_command(label="About and licences", command=self.about)
+        help_menu.add_separator()
+        help_menu.add_command(label="Uninstall app…", command=self.uninstall)
+        self.help_menu = help_menu
         help_button.configure(menu=help_menu)
         main = ttk.Frame(root, padding=(20,16)); main.pack(fill="both", expand=True)
         line = ttk.Frame(main); line.pack(fill="x")
@@ -160,6 +165,28 @@ class App:
     def open_help(self):
         open_path(asset("quick-start.html"))
 
+    def open_download_page(self):
+        webbrowser.open(DOWNLOAD_PAGE)
+
+    def uninstall(self):
+        if self.busy:
+            messagebox.showinfo("App is busy", "Finish or cancel the current operation before uninstalling.", parent=self.root)
+            return
+        command = uninstall_command()
+        if command is None:
+            messagebox.showinfo("Uninstall app",
+                "This copy has no installer to uninstall. For a portable copy, close the app and delete its extracted app folder.\n\n"
+                "If you installed it using Setup, use Windows Settings > Apps > GoPro VBOX Sync. "
+                "Keep your recordings and exports.", parent=self.root)
+            return
+        try:
+            subprocess.Popen(command, cwd=str(Path(command[0]).parent), close_fds=True)
+        except OSError as exc:
+            messagebox.showerror("Could not open uninstaller",
+                "Use Windows Settings > Apps > GoPro VBOX Sync to uninstall.\n\n" + str(exc), parent=self.root)
+            return
+        self.finish_close()
+
     def about(self):
         messagebox.showinfo("About GoPro VBOX Sync",
             f"GoPro VBOX Sync {__version__} · beta\n\n"
@@ -198,8 +225,9 @@ class App:
             else: messagebox.showinfo("Video tools ready", "FFmpeg and FFprobe are available. You can scan and export.")
             return
         if not messagebox.askokcancel("Set up video tools",
-            "Download FFmpeg 8.1.2 (110 MB) directly from Gyan's GitHub release?\n\n"
-            "The app checks the download's SHA-256 fingerprint and saves it for your Windows account. "
+            "FFmpeg and FFprobe are needed to read and create video.\n\n"
+            "Download both now (110 MB) from Gyan's GitHub release? "
+            "The app verifies the download and saves the tools for your Windows account. "
             "Allow about 500 MB of free space. No recordings are uploaded.\n\n"
             "FFmpeg is separate GPLv3 software; its licence is included in the download.", parent=self.root):
             return
@@ -339,6 +367,7 @@ class App:
 
     def set_busy(self, busy):
         self.busy = busy
+        self.help_menu.entryconfigure("Uninstall app…", state="disabled" if busy else "normal")
         for widget in (self.scan_button, self.browse, self.source_entry, self.output_entry, self.output_button):
             widget.configure(state="disabled" if busy else "normal")
         self.quality_combo.configure(state="disabled" if busy else "readonly")

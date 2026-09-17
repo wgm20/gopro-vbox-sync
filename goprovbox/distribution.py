@@ -5,18 +5,35 @@ from pathlib import Path
 import hashlib
 import os
 import shutil
+import sys
 import tempfile
 import urllib.request
 import zipfile
 
 REPOSITORY = "https://github.com/wgm20/gopro-vbox-sync"
 RELEASES = REPOSITORY + "/releases"
+DOWNLOAD_PAGE = "https://wgm20.github.io/gopro-vbox-sync/"
 FFMPEG_VERSION = "8.1.2"
 FFMPEG_URL = ("https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/"
               "ffmpeg-8.1.2-essentials_build.zip")
 # Matches the SHA-256 digest published by the distributor's GitHub release API.
 FFMPEG_SHA256 = "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec"
 FFMPEG_BYTES = 109728040
+
+
+def uninstall_command() -> list[str] | None:
+    """Use only this installed copy's uninstaller, never another installation."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return None
+    executable = Path(sys.executable).resolve()
+    if executable.name.lower() != "goprovboxsync.exe":
+        return None
+    program = executable.parent / "unins000.exe"
+    if (program.is_file() and program.with_suffix(".dat").is_file()
+            and program.resolve().parent == executable.parent):
+        # Keep the uninstaller's normal confirmation; never reboot automatically.
+        return [str(program), "/NORESTART"]
+    return None
 
 
 def data_directory() -> Path:

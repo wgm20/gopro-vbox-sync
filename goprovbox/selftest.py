@@ -6,7 +6,7 @@ import sys
 import tkinter as tk
 
 from . import __version__
-from .distribution import asset
+from .distribution import asset, uninstall_command
 from .engine import scan_folder, export
 from .media import probe
 
@@ -33,6 +33,7 @@ def run_self_test(destination: Path):
     assert (result / "Report.html").is_file()
     assert asset("quick-start.html").is_file()
     report = {"version": __version__, "frozen": bool(getattr(sys, "frozen", False)),
+              "uninstaller_available": uninstall_command() is not None,
               "passed": True, "matched_videos": 2, "exported_videos": 1,
               "checks": ["Tk and packaged icon", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "four-channel overlay", "encoded video and VBO verification",

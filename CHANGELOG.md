@@ -1,5 +1,14 @@
 # Release notes
 
+## 1.4.0b4 — Help menu shortcuts
+
+- Adds Help → Download page for the latest public installer.
+- Adds Help → Uninstall app, using this installed copy's own uninstaller with its normal confirmation. Uninstall is unavailable during processing. Portable copies show removal instructions.
+- Clarifies that video-tools setup downloads both FFmpeg and FFprobe.
+- Tests missing-tools setup, cancellation and resuming, plus uninstall lookup, launch failures and active-work protection. Installer checks verify that the packaged app finds its uninstaller.
+
+Video processing is unchanged.
+
 ## 1.4.0b3 — Six 7 branding
 
 - Adds the supplied Six 7 artwork to the app header, welcome screen, download page and offline guide.
