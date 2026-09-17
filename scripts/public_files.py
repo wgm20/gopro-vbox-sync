@@ -9,7 +9,7 @@ PATTERNS = ("goprovbox/*.py", "goprovbox/assets/*.html", "goprovbox/assets/*.png
             "goprovbox/assets/*.ico", "goprovbox/assets/demo/*.MP4", "goprovbox/assets/demo/*.vbo",
             "goprovbox/assets/demo/*.txt", "goprovbox/assets/licenses/*.txt", "tests/*.py",
             "scripts/*.py", "scripts/*.ps1", "release/*.iss", "release/*.txt", "release/*.md",
-            ".github/workflows/*.yml", ".github/ISSUE_TEMPLATE/*.md", "docs/*.html")
+            ".github/workflows/*.yml", ".github/ISSUE_TEMPLATE/*.md", "docs/*.html", "docs/*.png", "docs/*.ico")
 
 
 def public_files():

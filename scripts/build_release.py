@@ -14,16 +14,21 @@ sys.path.insert(0, str(ROOT))
 from goprovbox import __version__
 
 
+def build_icons():
+    """Package the supplied brand artwork at the sizes used by Windows."""
+    from PIL import Image
+    icons = ROOT / "goprovbox/assets"
+    with Image.open(icons / "brand.png") as artwork:
+        im = artwork.convert("RGBA").resize((256, 256), Image.Resampling.LANCZOS)
+    im.save(icons / "icon.png")
+    im.save(icons / "icon.ico", sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])
+
+
 def main():
     if os.name != "nt": raise SystemExit("Build on 64-bit Windows")
     os.chdir(ROOT)
-    from PIL import Image, ImageDraw
     icons = ROOT / "goprovbox/assets"
-    im = Image.new("RGBA", (256, 256), "#172d42"); draw = ImageDraw.Draw(im)
-    draw.rounded_rectangle((30,38,226,218), radius=35, fill="#087f74")
-    draw.polygon([(78,75),(78,177),(164,126)], fill="white")
-    draw.line([(157,192),(175,161),(193,186),(219,129)], fill="#79f2d3", width=12)
-    im.save(icons / "icon.png"); im.save(icons / "icon.ico", sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+    build_icons()
     notices = icons / "licenses"; notices.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", notices / "MIT.txt")
     shutil.copy2(Path(sys.base_prefix) / "LICENSE.txt", notices / "Python.txt")
@@ -36,7 +41,7 @@ def main():
         if not (notices / (name + ".txt")).is_file(): raise RuntimeError(f"Missing {name} notice")
     build = ROOT / "build"; build.mkdir(exist_ok=True)
     (build / "version-info.txt").write_text('''VSVersionInfo(
-      ffi=FixedFileInfo(filevers=(1,4,0,2), prodvers=(1,4,0,2), mask=0x3f, flags=2,
+      ffi=FixedFileInfo(filevers=(1,4,0,3), prodvers=(1,4,0,3), mask=0x3f, flags=2,
                        OS=0x40004, fileType=1, subtype=0, date=(0,0)),
       kids=[StringFileInfo([StringTable('040904B0', [
         StringStruct('CompanyName','GoPro VBOX Sync contributors'),

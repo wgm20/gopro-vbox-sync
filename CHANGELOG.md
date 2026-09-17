@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.4.0b3 — Six 7 branding
+
+- Adds the supplied Six 7 artwork to the app header, welcome screen, download page and offline guide.
+- Uses the matching navy-and-white icon for the app, installer, desktop and Start menu shortcuts, and browser tab.
+- Packages Windows icons at seven sizes from 16 to 256 pixels.
+
+Video processing is unchanged.
+
 ## 1.4.0b2 — clearer folder instructions
 
 - Clarifies that GoPro MP4 files should be added to the folder containing your VBOX runs, alongside the original VBOX videos.

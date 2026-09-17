@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import traceback
 import webbrowser
+from PIL import Image, ImageTk
 
 from . import __version__
 from .engine import scan_folder, export
@@ -81,6 +82,10 @@ class App:
         style.map("Treeview", background=[("selected", "#d1ebe5")], foreground=[("selected", "#15392f")])
         style.configure("TProgressbar", background="#078b7e", troughcolor="#dce3e9")
         header = tk.Frame(root, bg="#172d42", padx=22, pady=13); header.pack(fill="x")
+        with Image.open(asset("brand.png")) as artwork:
+            self.header_brand = ImageTk.PhotoImage(artwork.resize((44, 44), Image.Resampling.LANCZOS), master=root)
+            self.welcome_brand = ImageTk.PhotoImage(artwork.resize((64, 64), Image.Resampling.LANCZOS), master=root)
+        tk.Label(header, image=self.header_brand, bg="#172d42", borderwidth=0).pack(side="left", padx=(0,14))
         tk.Label(header, text="GoPro VBOX Sync", bg="#172d42", fg="white", font=("Segoe UI", 19, "bold")).pack(side="left")
         tk.Label(header, text=__version__, bg="#172d42", fg="#c1ced8", font=("Segoe UI", 10)).pack(side="right")
         help_button = ttk.Menubutton(header, text="Help")
@@ -166,7 +171,9 @@ class App:
         window = tk.Toplevel(self.root); window.title("Welcome to GoPro VBOX Sync")
         window.transient(self.root); window.resizable(False, False)
         body = ttk.Frame(window, padding=24); body.pack(fill="both", expand=True)
-        ttk.Label(body, text="Your GoPro video. Your VBOX data.", font=("Segoe UI", 17, "bold")).pack(anchor="w")
+        intro = ttk.Frame(body); intro.pack(fill="x")
+        ttk.Label(intro, image=self.welcome_brand, padding=0).pack(side="left", padx=(0,16))
+        ttk.Label(intro, text="Your GoPro video. Your VBOX data.", font=("Segoe UI", 17, "bold")).pack(side="left")
         ttk.Label(body, text="1. Put the GoPro MP4 files in the folder with your VBOX runs.\n"
                   "2. Scan, choose the videos to include and check rotation.\n"
                   "3. Preview the overlay, then create your files.", padding=(0,16), justify="left").pack(anchor="w")
