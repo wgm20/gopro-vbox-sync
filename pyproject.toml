@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gopro-vbox-sync"
+version = "1.4.0b1"
+description = "Synchronise GoPro video with original VBOX telemetry for Circuit Tools 3"
+requires-python = ">=3.11"
+dependencies = ["Pillow>=10.1"]
+license = "MIT"
+
+[project.urls]
+Homepage = "https://github.com/wgm20/gopro-vbox-sync"
+Issues = "https://github.com/wgm20/gopro-vbox-sync/issues"
+
+[project.scripts]
+gopro-vbox = "goprovbox.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["goprovbox*"]
+
+[tool.setuptools.package-data]
+goprovbox = ["assets/*", "assets/demo/*", "assets/licenses/*"]

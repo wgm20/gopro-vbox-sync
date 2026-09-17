@@ -1,0 +1,19 @@
+__pycache__/
+*.py[cod]
+.venv/
+.venv-build/
+.venv-release/
+.build-tools/
+release-output/
+CHECKSUM_INVESTIGATION.md
+OVERLAY_VALIDATION.md
+VALIDATION.md
+Install Desktop Shortcut.ps1
+*.code-workspace
+.pytest_cache/
+build/
+dist/
+scratch/
+# Locally generated examples contain private recordings and scene artwork.
+Examples/
+*.egg-info/

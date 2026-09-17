@@ -1,0 +1,8 @@
+PRACTICE RECORDINGS
+
+All video and telemetry are synthetic, released under MIT.
+Scan this folder. Both videos are included by default. Try unticking one.
+Run 1 overlaps 12:00:02 to 12:00:11.9; run 2 overlaps 12:00:20 to 12:00:30.
+Both are upright. Choose Driving data with Scene blank, then Preview output.
+Video continues where data is absent; gauges disappear outside the overlap.
+These files exercise the app, not VBOX authenticity or Circuit Tools acceptance.

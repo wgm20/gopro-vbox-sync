@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.MP4 binary
+*.png binary
+*.ico binary
+*.vbo -text
+goprovbox/assets/licenses/* -text whitespace=-trailing-space,-blank-at-eof
