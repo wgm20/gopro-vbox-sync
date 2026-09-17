@@ -1,9 +1,6 @@
 GoPro VBOX Sync is free and open source.
 
-BETA COMPATIBILITY NOTICE
-Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This issue remains unresolved. Re-encoding is not a proven fix. Test a short recording before processing a full day. Original recordings are not modified.
-
 GETTING STARTED
 No Python installation is required. The app offers a verified download of FFmpeg video tools when needed (about 110 MB). Practice recordings and an offline guide are included. Full-scene overlays require a supported scene and a separate local installation of VBOX Video Setup.
 
-Independent project, not affiliated with GoPro or Racelogic. Third-party notices are included in Help. This beta installer is unsigned.
+Independent project, not affiliated with GoPro or Racelogic. Third-party notices are included in Help.

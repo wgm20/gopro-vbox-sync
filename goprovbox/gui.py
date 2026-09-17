@@ -159,8 +159,6 @@ class App:
         messagebox.showinfo("About GoPro VBOX Sync",
             f"GoPro VBOX Sync {__version__} · beta\n\n"
             "Free and open source under the MIT licence. No account or activation.\n\n"
-            "Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error. "
-            "This is unresolved; encoding is not a proven fix.\n\n"
             "Independent project, not affiliated with GoPro or Racelogic. "
             "The quick-start guide includes privacy details and third-party licences.", parent=self.root)
 
@@ -169,12 +167,9 @@ class App:
         window.transient(self.root); window.resizable(False, False)
         body = ttk.Frame(window, padding=24); body.pack(fill="both", expand=True)
         ttk.Label(body, text="Your GoPro video. Your VBOX data.", font=("Segoe UI", 17, "bold")).pack(anchor="w")
-        ttk.Label(body, text="1. Put the original MP4 and VBO files in one folder.\n"
+        ttk.Label(body, text="1. Put the GoPro MP4 files in the folder with your VBOX runs.\n"
                   "2. Scan, choose the videos to include and check rotation.\n"
                   "3. Preview the overlay, then create your files.", padding=(0,16), justify="left").pack(anchor="w")
-        ttk.Label(body, text="Beta: Circuit Tools 3 may reject generated VBO files with a checksum error. "
-                  "This is still unresolved. Try a short recording first.", wraplength=500,
-                  foreground="#915115").pack(anchor="w", pady=(0,18))
         actions = ttk.Frame(body); actions.pack(fill="x")
         def finish(action=None):
             self.welcomed = True; self.save_preferences(); window.destroy()
@@ -326,7 +321,7 @@ class App:
         self.worker(work)
 
     def choose_folder(self):
-        value = filedialog.askdirectory(title="Choose folder containing GoPro videos and VBOX files", initialdir=self.folder.get() or None)
+        value = filedialog.askdirectory(title="Choose the folder with your VBOX runs and GoPro MP4 files", initialdir=self.folder.get() or None)
         if value:
             self.folder.set(value)
 
@@ -368,7 +363,7 @@ class App:
             self.setup_tools(self.begin_scan); return
         folder = Path(self.folder.get())
         if not self.folder.get() or not folder.is_dir():
-            messagebox.showerror("Choose a folder", "Select the folder containing your GoPro MP4 and VBOX VBO files."); return
+            messagebox.showerror("Choose a folder", "Choose the folder with your VBOX runs and GoPro MP4 files."); return
         self.result = None; self.rotations = {}; self.progress["value"] = 0
         self.scan = None; self.included_videos.clear(); self.summary.set("")
         self.preview_generation += 1; self.preview_label.configure(image="", text="Preview")
@@ -484,7 +479,7 @@ class App:
                     self.status.set("Ready. Check the preview before exporting." if value.matches else "No matches. See Details.")
                 elif kind == "complete":
                     self.result = value
-                    self.status.set("Files created. View report for the Circuit Tools checksum limitation.")
+                    self.status.set("Files created. Open the folder or view the report.")
                     self.open_result.configure(state="normal"); self.open_report.configure(state="normal")
                 elif kind == "cancelled":
                     self.status.set("Cancelled. Original files are unchanged; diagnostics remain in the working folder.")

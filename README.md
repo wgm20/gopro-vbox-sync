@@ -13,7 +13,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 ## Get started
 
 1. Install and open GoPro VBOX Sync. The app offers a verified download of FFmpeg video tools if needed (110 MB; allow 500 MB free space). Processing works offline after setup.
-2. Put original GoPro MP4 chapters and VBOX VBO files in one folder. Choose it and click **Scan**. Subfolders are ignored.
+2. Put the GoPro MP4 files in the folder with your VBOX runs. Choose that folder and click **Scan**. Subfolders are ignored.
 3. Tick the videos to **Include**. Click each row to inspect its preview and check rotation.
 4. Choose resolution and overlay, then **Preview output** and **Create files**.
 5. Read the **Report**. Keep the generated MP4 and VBO files together. The MP4 also plays in ordinary video players.

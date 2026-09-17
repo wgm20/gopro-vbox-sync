@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.4.0b2 — clearer folder instructions
+
+- Clarifies that GoPro MP4 files should be added to the folder containing your VBOX runs, alongside the original VBOX videos.
+- Uses the same wording in the welcome screen, folder picker, quick-start guide and download page.
+- Simplifies the installer introduction, welcome screen, About box and completion message by removing the repeated compatibility notices. Detailed limitations remain in the guide and reports.
+
+Processing is unchanged from 1.4.0b1.
+
 ## 1.4.0b1 — first public beta
 
 - Windows installer and portable app; no separate Python installation.

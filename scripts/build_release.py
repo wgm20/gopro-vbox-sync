@@ -36,7 +36,7 @@ def main():
         if not (notices / (name + ".txt")).is_file(): raise RuntimeError(f"Missing {name} notice")
     build = ROOT / "build"; build.mkdir(exist_ok=True)
     (build / "version-info.txt").write_text('''VSVersionInfo(
-      ffi=FixedFileInfo(filevers=(1,4,0,1), prodvers=(1,4,0,1), mask=0x3f, flags=2,
+      ffi=FixedFileInfo(filevers=(1,4,0,2), prodvers=(1,4,0,2), mask=0x3f, flags=2,
                        OS=0x40004, fileType=1, subtype=0, date=(0,0)),
       kids=[StringFileInfo([StringTable('040904B0', [
         StringStruct('CompanyName','GoPro VBOX Sync contributors'),
