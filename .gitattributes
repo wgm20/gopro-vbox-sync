@@ -2,5 +2,5 @@
 *.MP4 binary
 *.png binary
 *.ico binary
-*.vbo -text
-goprovbox/assets/licenses/* -text whitespace=-trailing-space,-blank-at-eof
+*.vbo -text whitespace=cr-at-eol
+goprovbox/assets/licenses/* -text whitespace=cr-at-eol,-trailing-space,-blank-at-eof
