@@ -370,7 +370,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         scan = select_for_export(scan, included)
         rotations = {name:value for name,value in rotations.items() if name in included}
     output = (output or scan.folder / ("GoPro Circuit Tools Overlay" if telemetry_overlay else "GoPro Circuit Tools")).resolve()
-    if output == scan.folder or output in scan.folder.parents:
+    source_folder = scan.folder.resolve()
+    if output == source_folder or output in source_folder.parents:
         raise TelemetryError("Choose a separate output folder, not the source folder or one of its parents")
     if not scan.matches:
         raise TelemetryError("No verified GPS overlap was found. See the scan results for details.")

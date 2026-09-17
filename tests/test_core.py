@@ -7,6 +7,7 @@ from threading import Event
 from unittest.mock import patch
 import json
 import math
+import os
 import struct
 import unittest
 
@@ -326,6 +327,12 @@ class VBOTests(unittest.TestCase):
         for output in (self.folder,self.folder.parent):
             with self.subTest(output=output), self.assertRaisesRegex(TelemetryError,"separate output"):
                 export(scan,output)
+
+    def test_unsafe_output_refused_with_noncanonical_source_path(self):
+        scan = Scan(Path(os.path.relpath(self.folder)), [], [], [], [], [], {})
+        for output in (self.folder, self.folder.parent):
+            with self.subTest(output=output), self.assertRaisesRegex(TelemetryError, "separate output"):
+                export(scan, output)
 
     def test_unknown_rotation_requires_review(self):
         vbo = fixture(self.folder / "data.vbo")
