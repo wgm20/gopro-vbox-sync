@@ -23,6 +23,7 @@ from . import __version__
 from .gpmf import TelemetryError
 from .media import Video, inspect_video, probe, utc_text, executable, run, preview, rotation_filter, CREATE_NO_WINDOW, percentile
 from .vbo import VBO, Row, read_vbo, write_vbo
+from .crop import MODES as CROP_MODES, Reference, rectangle, reference_for
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
                          "Video playback, rotation and seeking were successful, but this intermittent VBO rejection remains unresolved.")
@@ -56,6 +57,8 @@ class Scan:
     ignored: list[str]
     errors: list[str]
     fingerprints: dict[str, dict]
+    crop_references: dict[str, Reference] = field(default_factory=dict)
+    crop_errors: dict[str, str] = field(default_factory=dict)
 
     def summary(self):
         return {"version": __version__, "source_folder": str(self.folder),
@@ -63,7 +66,9 @@ class Scan:
                 "matches": [m.summary() for m in self.matches],
                 "unmatched_vbo": [v.path.name for v in self.vbos if not any(m.vbo is v for m in self.matches)],
                 "unmatched_video": [v.path.name for v in self.videos if not any(m.video is v for m in self.matches)],
-                "ignored": self.ignored, "errors": self.errors, "source_fingerprints": self.fingerprints}
+                "ignored": self.ignored, "errors": self.errors, "source_fingerprints": self.fingerprints,
+                "crop_references": {name: ref.summary() for name, ref in self.crop_references.items()},
+                "crop_unavailable": self.crop_errors}
 
 
 def distance(lat1, lon1, lat2, lon2):
@@ -84,7 +89,9 @@ def select_for_export(scan: Scan, names: set[str]) -> Scan:
     vbos = [v for v in scan.vbos if any(m.vbo is v for m in matches)]
     sources = names | {v.path.name for v in vbos}
     return replace(scan, videos=[v for v in scan.videos if v.path.name in names], vbos=vbos,
-                   matches=matches, fingerprints={n:f for n,f in scan.fingerprints.items() if n in sources})
+                   matches=matches, fingerprints={n:f for n,f in scan.fingerprints.items() if n in sources},
+                   crop_references={n:r for n,r in scan.crop_references.items() if n in names},
+                   crop_errors={n:e for n,e in scan.crop_errors.items() if n in names})
 
 
 def check_pair(vbo: VBO, video: Video, rows: list[Row]):
@@ -196,7 +203,19 @@ def scan_folder(folder: Path, log=lambda msg: None, cancel: Event | None = None)
                 matches.extend(intersections(vbo, video))
             except TelemetryError as exc:
                 errors.append(f"{video.path.name} / {vbo.path.name}: {exc}")
-    return Scan(folder, videos, vbos, matches, ignored, errors, fingerprints)
+    scan = Scan(folder, videos, vbos, matches, ignored, errors, fingerprints)
+    cache = {}
+    for video in videos:
+        if cancel and cancel.is_set():
+            raise InterruptedError("Cancelled")
+        linked = [m for m in matches if m.video is video]
+        if not linked:
+            continue
+        try:
+            scan.crop_references[video.path.name] = reference_for(linked, cache)
+        except (TelemetryError, OSError, ValueError) as exc:
+            scan.crop_errors[video.path.name] = str(exc)
+    return scan
 
 
 def recording_groups(videos: list[Video]) -> list[list[Video]]:
@@ -216,30 +235,32 @@ def recording_groups(videos: list[Video]) -> list[list[Video]]:
     return groups
 
 
-def dimensions(video: Video, rotation: int, max_size: int):
+def dimensions(video: Video, rotation: int, max_size: int, crop=None):
     w, h = (video.height, video.width) if rotation % 180 else (video.width, video.height)
+    if crop:
+        w, h = crop.width, crop.height
     factor = min(1, max_size / max(w, h)) if max_size else 1
     return max(2, round(w * factor / 2) * 2), max(2, round(h * factor / 2) * 2)
 
 
-def encode_args(video: Video, destination: Path, rotation: int, max_size: int, backend: str, overlay=None):
+def encode_args(video: Video, destination: Path, rotation: int, max_size: int, backend: str, overlay=None, crop=None):
     if backend == "copy":
-        if overlay is not None:
-            raise TelemetryError("Drawing gauges requires re-encoding; choose HD, Full resolution or Compact")
+        if overlay is not None or crop is not None:
+            raise TelemetryError("Drawing gauges or cropping requires re-encoding; choose HD, Full resolution or Compact")
         return [executable("ffmpeg"), "-hide_banner", "-nostdin", "-n", "-display_rotation", str(-rotation),
                 "-noautorotate", "-i", str(video.path), "-map", "0:v:0", "-map", "0:a?",
                 "-c", "copy", "-map_metadata", "0", "-movflags", "+faststart",
                 "-progress", "pipe:1", "-nostats", str(destination)]
-    w, h = dimensions(video, rotation, max_size)
+    w, h = dimensions(video, rotation, max_size, crop)
     args = [executable("ffmpeg"), "-hide_banner", "-nostdin", "-y"]
-    if backend == "qsv":
+    if backend == "qsv" and crop is None:
         args += ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
     args += ["-noautorotate", "-i", str(video.path)]
     if overlay is not None:
         args += ["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", f"{overlay.size[0]}x{overlay.size[1]}",
                  "-framerate", video.fps, "-i", "pipe:0"]
     args += ["-map", "[with_data]" if overlay is not None else "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1"]
-    if backend == "qsv":
+    if backend == "qsv" and crop is None:
         filt = f"vpp_qsv=w={w}:h={h}:format=nv12:out_range=limited"
         if rotation:
             filt += ":transpose=" + {90: "clock", 180: "reversal", 270: "cclock"}[rotation]
@@ -247,9 +268,12 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
         if overlay is not None:
             filt += ",hwdownload,format=nv12"
     else:
-        filters = rotation_filter(rotation) + [f"scale={w}:{h}:flags=lanczos:out_range=tv", "format=yuv420p"]
+        # Crop upright CPU frames, then retain QSV encoding where available. This
+        # avoids driver-dependent QSV crop/transpose ordering and 10-bit surfaces.
+        filters = rotation_filter(rotation) + ([crop.filter()] if crop else []) + [f"scale={w}:{h}:flags=lanczos:out_range=tv", "setsar=1", "format=nv12" if backend == "qsv" else "format=yuv420p"]
         filt = ",".join(filters)
-        codec_args = ["-c:v", "libx264", "-preset", "fast", "-crf", "18"]
+        codec_args = (["-c:v", "h264_qsv", "-global_quality", "20", "-look_ahead", "0"] if backend == "qsv"
+                      else ["-c:v", "libx264", "-preset", "fast", "-crf", "18"])
     if overlay is not None:
         x, y = overlay.position
         args += ["-filter_complex", f"[0:v:0]{filt}[base];[base][1:v:0]overlay=x={x}:y={y}:eof_action=pass:repeatlast=0:format=auto,format=nv12[with_data]"]
@@ -264,13 +288,13 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
 
 
 def encode(video: Video, destination: Path, rotation: int, max_size: int, encoder: str,
-           log, progress, cancel: Event, overlay=None) -> str:
+           log, progress, cancel: Event, overlay=None, crop=None) -> str:
     backends = ["qsv", "software"] if encoder == "auto" and os.name == "nt" else ["software" if encoder == "auto" else encoder]
     for backend in backends:
-        log(f"Preparing {video.path.name}: {backend}, rotation {rotation}°, {dimensions(video, rotation, max_size)}")
+        log(f"Preparing {video.path.name}: {backend}, rotation {rotation}°, {dimensions(video, rotation, max_size, crop)}")
         logfile = destination.with_suffix(".encoding.log")
         with logfile.open("wb") as err:
-            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay),
+            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay, crop),
                 stdin=subprocess.PIPE if overlay is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=err, creationflags=CREATE_NO_WINDOW)
             overlay_errors = []
@@ -326,10 +350,10 @@ def encode(video: Video, destination: Path, rotation: int, max_size: int, encode
     raise AssertionError("No encoder selected")
 
 
-def validate_video(video: Video, destination: Path, rotation: int, max_size: int):
+def validate_video(video: Video, destination: Path, rotation: int, max_size: int, crop=None):
     meta = probe(destination)
     v = next(s for s in meta["streams"] if s["codec_type"] == "video")
-    expected = dimensions(video, rotation, max_size)
+    expected = dimensions(video, rotation, max_size, crop)
     if v.get("codec_name") != "h264" or (v["width"], v["height"]) != expected:
         raise TelemetryError("Encoded video has an unexpected format or size")
     if abs(float(v["duration"]) - video.duration) > max(.07, 2 / float(Fraction(video.fps))):
@@ -350,9 +374,14 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
            max_size: int = 1920, encoder="auto", video_mode="convert", log=lambda msg: None,
            progress=lambda value: None, cancel: Event | None = None,
            telemetry_overlay: bool = False, overlay_scene: Path | None = None, overlay_mode="four",
-           include_videos: set[str] | None = None) -> Path:
+           include_videos: set[str] | None = None, crops: dict[str, str] | None = None) -> Path:
     cancel = cancel or Event()
     rotations = rotations or {}
+    crops = crops or {}
+    if any(mode not in CROP_MODES for mode in crops.values()):
+        raise TelemetryError("Unknown crop option")
+    if set(crops) - {v.path.name for v in scan.videos}:
+        raise TelemetryError("Crop option refers to an unknown GoPro file")
     telemetry_overlay = telemetry_overlay or overlay_scene is not None or overlay_mode == "full"
     if video_mode != "convert":
         raise TelemetryError("Original-video mode has been removed because Circuit Tools compatibility is unresolved. Export requires re-encoding.")
@@ -369,7 +398,11 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         excluded_videos = [v.path.name for v in scan.videos if v.path.name not in included]
         scan = select_for_export(scan, included)
         rotations = {name:value for name,value in rotations.items() if name in included}
-    output = (output or scan.folder / ("GoPro Circuit Tools Overlay" if telemetry_overlay else "GoPro Circuit Tools")).resolve()
+        crops = {name:value for name,value in crops.items() if name in included}
+    default_name = "GoPro Circuit Tools Overlay" if telemetry_overlay else "GoPro Circuit Tools"
+    if any(mode != "none" for mode in crops.values()):
+        default_name += " Cropped"
+    output = (output or scan.folder / default_name).resolve()
     source_folder = scan.folder.resolve()
     if output == source_folder or output in source_folder.parents:
         raise TelemetryError("Choose a separate output folder, not the source folder or one of its parents")
@@ -386,6 +419,21 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         selected[video.path.name] = choice
     settings = {"version": __version__, "rotations": selected, "max_size": max_size, "encoder": encoder,
                 "included_videos": [v.path.name for v in used]}
+    crop_rectangles, crop_settings, cache = {}, {}, {}
+    for video in used:
+        name = video.path.name
+        mode = crops.get(name, "none")
+        if mode == "none":
+            continue
+        if cancel.is_set():
+            raise InterruptedError("Cancelled")
+        ref = reference_for([m for m in scan.matches if m.video is video], cache)
+        if name in scan.crop_references and ref != scan.crop_references[name]:
+            raise TelemetryError(f"{name}: original VBOX video changed since scan; scan again")
+        crop_rectangles[name] = rectangle(video.width, video.height, selected[name], ref.aspect, mode)
+        crop_settings[name] = {"mode": mode, "rectangle": crop_rectangles[name].summary(), "reference": ref.summary()}
+    if crop_settings:
+        settings["crops"] = crop_settings
     renderers = {}
     if telemetry_overlay:
         from .overlay import load_scene, Renderer
@@ -395,7 +443,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         settings["overlay"]["mode"] = overlay_mode
         for video in used:
             renderers[video.path.name] = Renderer(video, [m for m in scan.matches if m.video is video],
-                                                *dimensions(video, selected[video.path.name], max_size), scene)
+                                                *dimensions(video, selected[video.path.name], max_size, crop_rectangles.get(video.path.name)), scene)
         settings["overlay"]["notes"] = list(dict.fromkeys(note for renderer in renderers.values() for note in getattr(renderer, "notes", [])))
     signature = hashlib.sha256(json.dumps({"sources": scan.fingerprints, "settings": settings}, sort_keys=True).encode()).hexdigest()
     # Revalidate source metadata before committing to a long encode.
@@ -445,8 +493,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                 rotation = selected[video.path.name]
                 backend = encode(video, dest, rotation, max_size, encoder, log,
                                  lambda p: progress((duration_done + p * video.duration) / duration_total * .93), cancel,
-                                 overlay=renderers.get(video.path.name))
-                checked = validate_video(video, dest, rotation, max_size)
+                                 overlay=renderers.get(video.path.name), crop=crop_rectangles.get(video.path.name))
+                checked = validate_video(video, dest, rotation, max_size, crop_rectangles.get(video.path.name))
                 video_indices[video.path.name] = index
                 video_files[index] = filename
                 preview_time = min(30, video.duration / 2)
@@ -455,7 +503,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     preview_time = video.clock.media_time((first_match.rows[0].utc + first_match.rows[-1].utc) / 2)
                 preview(dest, preview_time, 0, staging / preview_name)
                 report["media"].append({"file": filename, "source": video.path.name, "rotation_clockwise": selected[video.path.name],
-                                         "encoder": backend, "preview": preview_name, "verification": checked})
+                                         "encoder": backend, "preview": preview_name, "verification": checked,
+                                         "crop": crop_settings.get(video.path.name)})
                 duration_done += video.duration
             for vbo in scan.vbos:
                 entries = []
@@ -497,6 +546,11 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         for name, info in scan.fingerprints.items():
             if fingerprint(scan.folder / name) != info:
                 raise TelemetryError(f"Source changed during export: {name}")
+        for setting in crop_settings.values():
+            for name, stamp in setting["reference"]["sources"].items():
+                stat = (scan.folder / name).stat()
+                if {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns} != stamp:
+                    raise TelemetryError(f"Original VBOX video changed during export: {name}")
         report["status"] = "complete"
         report["output_fingerprints"] = {p.name: fingerprint(p) for p in staging.iterdir() if p.suffix in (".vbo", ".mp4")}
         (staging / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -537,12 +591,18 @@ def verify_vbo(path: Path, source: VBO, rows: list[Row], times: list[float], ind
 
 def write_report(report: dict, path: Path):
     e = html.escape
+    def crop_description(media):
+        crop = media.get("crop")
+        if not crop:
+            return "No crop"
+        mode = {"top": "cut off top", "bottom": "cut off bottom", "centre": "centre crop"}[crop["mode"]]
+        return "VBOX " + crop["reference"]["aspect"] + " · " + mode
     rows = "".join(f'<tr><td><a href="{e(o["file"])}">{e(o["file"])}</a></td><td>{o["overlap_seconds"] / 60:.2f} min</td>'
                    f'<td>{o["samples"]:,}</td><td>{e(o["utc_start"])}<br>{e(o["utc_end"])}</td></tr>' for o in report["outputs"])
     cards = "".join(f'<article><img src="{e(m.get("preview", Path(m["file"]).stem + ".jpg"))}"><h3>{e(m["source"])}</h3>'
                     f'<p>Rotation: {m["rotation_clockwise"]}° clockwise · {m["verification"]["dimensions"][0]} × '
                     f'{m["verification"]["dimensions"][1]} · {e(m["verification"]["codec"].upper())}</p>'
-                    f'<p>Encoded to H.264</p></article>' for m in report["media"])
+                    f'<p>{e(crop_description(m))} · Encoded to H.264</p></article>' for m in report["media"])
     storage_note = "Keep their MP4 files beside them."
     warnings = report.get("compatibility_notes", []) + report["errors"] + [w for v in report["videos"] for w in v["warnings"]] + [w for m in report["matches"] for w in m["warnings"]]
     overlay_info = report.get("settings", {}).get("overlay")

@@ -52,16 +52,18 @@ class SelectionTests(unittest.TestCase):
         app.output = Mock(); app.output.get.return_value = str(self.folder / 'out')
         app.quality = Mock(); app.quality.get.return_value = 'HD · 1920 px'
         app.overlay_mode = Mock(); app.overlay_mode.get.return_value = 'None'
-        app.rotations = {}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
+        app.rotations = {}; app.crops = {'GX010002.mp4': 'top'}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
         app.events = queue.Queue(); app.worker = Mock()
         app.selected_video = Mock(return_value=self.clips[0])
         App.begin_export(app)
         job = app.worker.call_args.args[0]
         # A pending job owns a snapshot even if UI state is subsequently reset.
         app.included_videos.clear()
+        app.crops.clear()
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
             job()
         self.assertEqual(dispatch.call_args.kwargs['include_videos'], {'GX010002.mp4'})
+        self.assertEqual(dispatch.call_args.kwargs['crops'], {'GX010002.mp4': 'top'})
         app.selected_video.assert_not_called()
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
@@ -77,7 +79,7 @@ class SelectionTests(unittest.TestCase):
         first.path.unlink()  # An excluded source disappearing must not block export.
         chosen = {second.path.name}
         result = export(self.scan, self.folder / 'out', include_videos=chosen,
-                        rotations={first.path.name:270}, encoder='software')
+                        rotations={first.path.name:270}, crops={first.path.name:'top'}, encoder='software')
         report = json.loads((result / 'report.json').read_text())
         self.assertEqual([m['source'] for m in report['media']], [second.path.name])
         self.assertEqual(report['settings']['included_videos'], [second.path.name])

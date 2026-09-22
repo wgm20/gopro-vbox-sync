@@ -14,7 +14,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 
 1. Install and open GoPro VBOX Sync. The app offers a verified download of FFmpeg video tools if needed (110 MB; allow 500 MB free space). Processing works offline after setup.
 2. Put the GoPro MP4 files in the folder with your VBOX runs. Choose that folder and click **Scan**. Subfolders are ignored.
-3. Tick the videos to **Include**. Click each row to inspect its preview and check rotation.
+3. Tick the videos to **Include**. Click each row to inspect its preview and check rotation. Use **Crop** below the preview to match the original VBOX video’s shape: cut off top, cut off bottom, or centre crop. Keep the original VBOX MP4/AVI files beside the VBO files. Each video has its own choice.
 4. Choose resolution and overlay, then **Preview output** and **Create files**.
 5. Read the **Report**. Keep the generated MP4 and VBO files together. The MP4 also plays in ordinary video players.
 
@@ -24,6 +24,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 
 - Matches by GoPro GPS timestamps, checks concurrent position and speed, and handles partial overlaps, gaps, midnight and consecutive camera chapters.
 - Suggests upright rotation from camera metadata and gives you a preview to check.
+- Crops each GoPro to the linked VBOX video’s display aspect ratio, with top, bottom and centre choices. Rotation is applied first and overlays are fitted afterwards. Missing or conflicting original VBOX videos disable cropping for that recording; No crop remains available. Wider inputs trim both sides equally.
 - Exports only the videos you tick. Keeps the whole video chapter and links only overlapping VBOX samples.
 - Adds speed, RPM, throttle and brake with a built-in dashboard or a supported scene.
 - Renders a supported full scene, excluding the rear camera, with proportional gauges and an undistorted track map.
@@ -32,7 +33,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 | Option | Result |
 |---|---|
 | HD / Compact | Longest edge up to 1920 / 1280 pixels |
-| Full resolution | Original image dimensions after rotation |
+| Full resolution | Image dimensions after rotation and optional cropping |
 | Overlay: None | Corrected video without burned-in data |
 | Overlay: Driving data | Four channels; leave Scene blank for the built-in dashboard |
 | Overlay: Full scene · no rear camera | Supported gauges, artwork, map, G-ball and lap/delta displays from a selected scene |
@@ -67,7 +68,7 @@ For developers with Python 3.11+ and FFmpeg/FFprobe available:
 python -m pip install -e .
 python -m goprovbox "C:\Recordings\Track day" --gui
 python -m goprovbox "C:\Recordings\Track day" --scan --report scan.json
-python -m goprovbox "C:\Recordings\Track day" --overlay --encoder software
+python -m goprovbox "C:\Recordings\Track day" --overlay --crop centre --encoder software
 python -m unittest discover -s tests -v
 ```
 

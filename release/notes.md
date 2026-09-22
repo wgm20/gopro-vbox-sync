@@ -1,8 +1,8 @@
 Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry.
 
-**Updated in 1.4.0b5:** desktop and Start menu shortcuts now use the Six 7 icon file directly, avoiding the old executable icon cached by Windows after upgrades. App behaviour and video processing are unchanged.
+**Updated in 1.5.0b1:** select a GoPro row and use **Crop** to match the original VBOX video’s shape. Choose **cut off top**, **cut off bottom** or **centre crop**; the preview updates immediately. Keep the original VBOX videos beside the VBO files. Rotation happens first, and gauges are fitted to the cropped frame. Cropped exports have a separate default folder.
 
-**Start here:** download **GoPro-VBOX-Sync-1.4.0b5-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
+**Start here:** download **GoPro-VBOX-Sync-1.5.0b1-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. The issue remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved.
 

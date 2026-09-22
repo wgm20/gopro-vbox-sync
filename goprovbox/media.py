@@ -296,11 +296,13 @@ def rotation_filter(clockwise: int) -> list[str]:
 
 
 def preview(path: Path, seconds: float, clockwise: int, destination: Path, width: int = 800,
-            max_height: int | None = None):
+            max_height: int | None = None, *, crop=None, output_size=None):
     # Windows storage cleanup can remove an idle preview cache while the app is open.
     destination.parent.mkdir(parents=True, exist_ok=True)
     scale = f"scale={width}:{max_height}:force_original_aspect_ratio=decrease" if max_height else f"scale={width}:-2"
-    filters = rotation_filter(clockwise) + [scale]
+    if output_size:
+        scale = f"scale={output_size[0]}:{output_size[1]}:flags=lanczos"
+    filters = rotation_filter(clockwise) + ([crop.filter()] if crop else []) + [scale, "setsar=1"]
     run([executable("ffmpeg"), "-v", "error", "-nostdin", "-noautorotate", "-ss", str(max(0, seconds)),
          "-i", str(path), "-map", "0:v:0", "-frames:v", "1", "-vf", ",".join(filters),
          "-update", "1", "-y", str(destination)], timeout=90)

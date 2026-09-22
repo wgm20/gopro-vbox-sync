@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.5.0b1 — VBOX-shaped video cropping
+
+- Adds a Crop choice for each GoPro video: No crop, cut off top, cut off bottom, or centre crop. The preview pane updates when the choice changes.
+- Uses the display aspect ratio of the original VBOX videos linked to the overlapping data, including pixel shape and rotation. Keep those videos alongside the VBO files. Missing or conflicting reference shapes leave uncropped processing available.
+- Corrects rotation before cropping, then scales and lays out overlays within the finished frame. Wider sources trim both sides equally. Cropped exports use a separate default output folder.
+- Preview and export share crop coordinates; audio, frame cadence, GPS alignment and VBO telemetry are retained. Real-video tests check frame contents, rotation, overlays, missing/changed references and safe reruns.
+
 ## 1.4.0b5 — shortcut icon refresh
 
 - Desktop and Start menu shortcuts point directly to the Six 7 icon file, avoiding the old executable icon cached by Windows after an upgrade.

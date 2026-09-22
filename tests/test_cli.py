@@ -8,9 +8,17 @@ import unittest
 
 from goprovbox.__main__ import main
 from goprovbox.engine import Scan
+from tests.test_core import video
 
 
 class CLITests(unittest.TestCase):
+    def test_crop_option_reaches_export_for_each_video(self):
+        clip = video(Path('clip.mp4'))
+        scan = Scan(Path('.'), [clip], [], [], [], [], {})
+        with patch('goprovbox.__main__.scan_folder', return_value=scan), patch('goprovbox.__main__.export') as dispatch:
+            self.assertEqual(main(['recordings', '--crop', 'bottom']), 0)
+        self.assertEqual(dispatch.call_args.kwargs['crops'], {'clip.mp4': 'bottom'})
+
     def test_original_video_option_is_removed_before_scan(self):
         with patch("goprovbox.__main__.scan_folder") as scan, redirect_stderr(StringIO()):
             with self.assertRaises(SystemExit) as error:
