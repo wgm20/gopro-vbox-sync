@@ -4,7 +4,7 @@
 
 [**Download for Windows →**](https://wgm20.github.io/gopro-vbox-sync/)
 
-Use the download page's **Download for Windows** button. No Python installation, payment, activation or GitHub account is needed. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.5.0b2): extract the entire folder before opening GoProVBOXSync.exe.
+Use the download page's **Download for Windows** button. No Python installation, payment, activation or GitHub account is needed. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.5.0b3): extract the entire folder before opening GoProVBOXSync.exe.
 
 > **Beta: Circuit Tools 3 compatibility is unresolved.** Circuit Tools can reject generated VBO files with an authenticity/checksum error and may close. Re-encoding is not a proven fix. A successful export does not guarantee Circuit Tools acceptance. Test a short run first.
 
