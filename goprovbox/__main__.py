@@ -21,6 +21,8 @@ def main(argv=None):
     parser.add_argument("--crop", choices=["none", "top", "bottom", "centre"], default="none",
                         help="Match the original VBOX video's shape: remove top, bottom, or centre crop")
     parser.add_argument("--full-video", action="store_true", help="Keep full videos instead of only periods with matching VBOX data")
+    parser.add_argument("--audio", choices=["vbox", "gopro"], default="vbox",
+                        help="Sound source: VBOX by default, with GoPro sound for gaps")
     parser.add_argument("--overlay", action="store_true", help="Burn speed, RPM, throttle and brake into encoded video")
     parser.add_argument("--scene", type=Path, help="VBOX HD2 VVHSN scene (implies --overlay)")
     parser.add_argument("--overlay-mode", choices=["four", "full"], default="four", help="four driving channels, or full scene without the rear camera")
@@ -54,7 +56,7 @@ def main(argv=None):
                 print(f"Progress: {p}%", flush=True); last[0] = p
         export(scan, args.output, rotations=rotations, max_size=args.max_size, encoder=args.encoder,
                crops={v.path.name: args.crop for v in scan.videos},
-               overlap_only=not args.full_video,
+               overlap_only=not args.full_video, audio_source=args.audio,
                log=print, progress=progress, telemetry_overlay=args.overlay, overlay_scene=args.scene, overlay_mode=args.overlay_mode)
         return 0
     except (KeyboardInterrupt, InterruptedError):

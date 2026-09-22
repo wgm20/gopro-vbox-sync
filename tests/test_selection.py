@@ -54,6 +54,7 @@ class SelectionTests(unittest.TestCase):
         app.overlay_mode = Mock(); app.overlay_mode.get.return_value = 'None'
         app.rotations = {}; app.crops = {'GX010002.mp4': 'top'}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
         app.overlap_only = Mock(); app.overlap_only.get.return_value = True
+        app.audio_source = Mock(); app.audio_source.get.return_value = 'VBOX (GoPro for gaps)'
         app.events = queue.Queue(); app.worker = Mock()
         app.selected_video = Mock(return_value=self.clips[0])
         App.begin_export(app)
@@ -62,11 +63,13 @@ class SelectionTests(unittest.TestCase):
         app.included_videos.clear()
         app.crops.clear()
         app.overlap_only.get.return_value = False
+        app.audio_source.get.return_value = 'GoPro'
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
             job()
         self.assertEqual(dispatch.call_args.kwargs['include_videos'], {'GX010002.mp4'})
         self.assertEqual(dispatch.call_args.kwargs['crops'], {'GX010002.mp4': 'top'})
         self.assertTrue(dispatch.call_args.kwargs['overlap_only'])
+        self.assertEqual(dispatch.call_args.kwargs['audio_source'], 'vbox')
         self.assertEqual(dispatch.call_args.kwargs['rotations'], {v.path.name: 0 for v in self.clips})
         app.selected_video.assert_not_called()
 

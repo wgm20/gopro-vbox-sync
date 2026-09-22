@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.6.0b1 — aligned VBOX sound by default
+
+- Uses sound from the original VBOX videos by default. Keep them beside the VBO files. The new **Sound** choice remembers VBOX or GoPro.
+- Aligns each original video chapter using the VBO video timestamps and the GoPro GPS clock, including prebuffer, trimming, fractional frame rates and drift in both video and audio clocks. Burned-in gauge readings are not timing anchors.
+- Uses GoPro sound for uncovered periods, missing chapters, missing audio or unreliable VBOX timing; the report identifies the source files and fallback periods. Silence is used only when neither recording has sound. Ambiguous overlapping VBOX sources stop export.
+- Prepares and verifies the complete sound track, then attaches it without altering encoded video frames. This avoids truncation of the audio tail when the video is trimmed to an exact frame count.
+- Tests decoded waveform timing, independent clock drift, chapter boundaries, gaps, nonzero timestamps, cancellation, changed sources, unchanged video packets, preferences and the installed app. A private Silverstone recording was also used to check sound throughout a full run and a cropped scene export.
+
 ## 1.5.0b5 — round scene readouts correctly
 
 - Rounds whole-number text in both four-channel and full-scene overlays, matching observed recorder readouts instead of truncating fractional values.

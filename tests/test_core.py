@@ -362,7 +362,7 @@ class VBOTests(unittest.TestCase):
         scan = Scan(self.folder,[clip],[vbo],intersections(vbo,clip),[],[],{})
         with patch("goprovbox.engine.encode", side_effect=TelemetryError("test failure")):
             with self.assertRaises(TelemetryError):
-                export(scan,self.folder / "output")
+                export(scan,self.folder / "output",audio_source="gopro")
         self.assertFalse((self.folder / "output").exists())
         reports = list(self.folder.glob(".output.working-*/report.json"))
         self.assertEqual(json.loads(reports[0].read_text())["status"],"failed")

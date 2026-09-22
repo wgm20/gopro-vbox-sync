@@ -25,6 +25,7 @@ from .distribution import (asset, data_directory, tools_ready, download_tools, c
 ROTATIONS = {"Upright — no rotation": 0, "90° clockwise": 90, "180°": 180, "90° anticlockwise": 270}
 QUALITY = {"HD · 1920 px": 1920, "Full resolution": 0, "Compact · 1280 px": 1280}
 OVERLAYS = {"None": "none", "Driving data": "four", "Full scene · no rear camera": "full"}
+SOUND = {"VBOX (GoPro for gaps)": "vbox", "GoPro": "gopro"}
 
 
 
@@ -67,6 +68,8 @@ class App:
         self.rotation = tk.StringVar(value=next(iter(ROTATIONS)))
         self.crop_note = tk.StringVar()
         self.overlap_only = tk.BooleanVar(value=prefs.get("overlap_only", True))
+        self.audio_source = tk.StringVar(value=next((label for label, value in SOUND.items()
+                                                    if value == prefs.get("audio_source", "vbox")), next(iter(SOUND))))
         self.overlay_mode = tk.StringVar(value=prefs.get("overlay_mode", "Driving data" if prefs.get("overlay_enabled") else "None"))
         if self.overlay_mode.get() not in OVERLAYS: self.overlay_mode.set("None")
         self.scene_path = tk.StringVar(value=prefs.get("scene_path", ""))
@@ -144,9 +147,13 @@ class App:
         ttk.Label(options, text="Overlay").pack(side="left",padx=(24,10))
         self.overlay_combo = ttk.Combobox(options, textvariable=self.overlay_mode, values=list(OVERLAYS), state="readonly", width=31)
         self.overlay_combo.pack(side="left"); self.overlay_combo.bind("<<ComboboxSelected>>", self.overlay_changed)
-        self.trim_check = ttk.Checkbutton(main, text="Only export video with VBOX data", variable=self.overlap_only,
+        soundrow = ttk.Frame(main); soundrow.pack(fill="x", pady=(0,10))
+        self.trim_check = ttk.Checkbutton(soundrow, text="Only export video with VBOX data", variable=self.overlap_only,
                                          command=self.quality_changed)
-        self.trim_check.pack(anchor="w", pady=(0,10))
+        self.trim_check.pack(side="left")
+        ttk.Label(soundrow, text="Sound").pack(side="left", padx=(24,10))
+        self.sound_combo = ttk.Combobox(soundrow, textvariable=self.audio_source, values=list(SOUND), state="readonly", width=25)
+        self.sound_combo.pack(side="left")
         self.scenerow = ttk.Frame(main)
         ttk.Label(self.scenerow, text="Scene", width=9).pack(side="left")
         self.scene_entry = ttk.Entry(self.scenerow, textvariable=self.scene_path)
@@ -379,6 +386,7 @@ class App:
             widget.configure(state="disabled" if busy else "normal")
         self.quality_combo.configure(state="disabled" if busy else "readonly")
         self.trim_check.configure(state="disabled" if busy else "normal")
+        self.sound_combo.configure(state="disabled" if busy else "readonly")
         self.overlay_combo.configure(state="disabled" if busy else "readonly")
         enabled = OVERLAYS[self.overlay_mode.get()] != "none" and not busy
         self.scene_entry.configure(state="normal" if enabled else "disabled")
@@ -490,6 +498,7 @@ class App:
         size = QUALITY[self.quality.get()]
         crops = deepcopy(self.crops)
         overlap_only = self.overlap_only.get()
+        audio_source = SOUND[self.audio_source.get()]
         mode = OVERLAYS[self.overlay_mode.get()]
         overlay_enabled = mode != "none"
         scene = Path(self.scene_path.get().strip()) if overlay_enabled and self.scene_path.get().strip() else None
@@ -498,7 +507,7 @@ class App:
         self.status.set("Preparing video and data…")
         self.progress["value"] = 0
         self.worker(lambda: self.events.put(("complete", export(scan, output, rotations=rotations, max_size=size,
-            include_videos=included, crops=crops, overlap_only=overlap_only,
+            include_videos=included, crops=crops, overlap_only=overlap_only, audio_source=audio_source,
             telemetry_overlay=overlay_enabled, overlay_scene=scene, overlay_mode=mode if mode != "none" else "four",
             log=lambda m: self.events.put(("log", m)), progress=lambda v: self.events.put(("progress", v)), cancel=self.cancel))))
 
@@ -592,6 +601,7 @@ class App:
             self.preferences.write_text(json.dumps({"folder": self.folder.get(), "quality": self.quality.get(),
                                                     "overlay_mode": self.overlay_mode.get(), "scene_path": self.scene_path.get(),
                                                     "overlap_only": self.overlap_only.get(),
+                                                    "audio_source": SOUND[self.audio_source.get()],
                                                     "welcomed": self.welcomed}), encoding="utf-8")
         except OSError:
             pass

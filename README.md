@@ -27,6 +27,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 - Defaults the desktop app to no rotation and gives you a preview to check. Manual rotation is available; detected orientation remains in scan details.
 - Lets you drag a crop over the full source image while previewing the finished picture and gauges. Cropping retains the linked VBOX video’s display aspect ratio, normally 16:9. Rotation is applied first and overlays are fitted afterwards. Missing or conflicting original VBOX videos disable cropping for that recording; uncropped output remains available. The command line retains its top, bottom and centre presets.
 - Exports only the videos you tick and links only overlapping VBOX samples.
+- Uses original VBOX sound by default, aligned using the VBO video references and GoPro GPS timestamps. Keep the original VBOX MP4 files beside the VBO files. **Sound → GoPro** retains the GoPro recording; the app remembers your choice. Missing or unreliable VBOX sound falls back to GoPro sound, with the affected periods listed in the report.
 - Adds speed, RPM, throttle and brake with a built-in dashboard or a supported scene.
 - Renders a supported full scene, excluding the rear camera, with proportional gauges and an undistorted track map.
 - Preserves source recordings. New outputs are published only after validation; changed settings require a fresh output folder.
@@ -35,6 +36,8 @@ Use the download page's **Download for Windows** button. No Python installation,
 |---|---|
 | HD / Compact | Longest edge up to 1920 / 1280 pixels |
 | Full resolution | Image dimensions after rotation and optional cropping |
+| Sound: VBOX (GoPro for gaps) | Aligned original VBOX sound, with GoPro sound for uncovered periods |
+| Sound: GoPro | The GoPro camera's own sound |
 | Overlay: None | Corrected video without burned-in data |
 | Overlay: Driving data | Four channels; leave Scene blank for the built-in dashboard |
 | Overlay: Full scene · no rear camera | Supported gauges, artwork, map, G-ball and lap/delta displays from a selected scene |

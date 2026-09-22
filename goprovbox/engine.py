@@ -25,6 +25,7 @@ from .media import Video, inspect_video, probe, utc_text, executable, run, previ
 from .vbo import VBO, Row, read_vbo, write_vbo
 from .crop import Choice, Reference, rectangle, reference_for, validate_choice
 from .trimming import video_parts
+from .sound import plan_audio, render_audio, attach_audio
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
                          "Video playback, rotation and seeking were successful, but this intermittent VBO rejection remains unresolved.")
@@ -245,7 +246,7 @@ def dimensions(video: Video, rotation: int, max_size: int, crop=None):
 
 
 def encode_args(video: Video, destination: Path, rotation: int, max_size: int, backend: str, overlay=None, crop=None,
-                source_start: float | None = None):
+                source_start: float | None = None, mute=False):
     if backend == "copy":
         if overlay is not None or crop is not None or source_start is not None:
             raise TelemetryError("Drawing gauges, cropping or trimming requires re-encoding; choose HD, Full resolution or Compact")
@@ -266,7 +267,9 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
     if overlay is not None:
         args += ["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", f"{overlay.size[0]}x{overlay.size[1]}",
                  "-framerate", video.fps, "-i", "pipe:0"]
-    args += ["-map", "[with_data]" if overlay is not None else "0:v:0", "-map", "0:a:0?", "-map_metadata", "-1"]
+    args += ["-map", "[with_data]" if overlay is not None else "0:v:0"]
+    args += ["-an"] if mute else ["-map", "0:a:0?"]
+    args += ["-map_metadata", "-1"]
     if backend == "qsv" and crop is None:
         filt = f"vpp_qsv=w={w}:h={h}:format=nv12:out_range=limited"
         if rotation:
@@ -306,13 +309,13 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
 
 
 def encode(video: Video, destination: Path, rotation: int, max_size: int, encoder: str,
-           log, progress, cancel: Event, overlay=None, crop=None, source_start: float | None = None) -> str:
+           log, progress, cancel: Event, overlay=None, crop=None, source_start: float | None = None, mute=False) -> str:
     backends = ["qsv", "software"] if encoder == "auto" and os.name == "nt" else ["software" if encoder == "auto" else encoder]
     for backend in backends:
         log(f"Preparing {video.path.name}: {backend}, rotation {rotation}°, {dimensions(video, rotation, max_size, crop)}")
         logfile = destination.with_suffix(".encoding.log")
         with logfile.open("wb") as err:
-            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay, crop, source_start),
+            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay, crop, source_start, mute),
                 stdin=subprocess.PIPE if overlay is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=err, creationflags=CREATE_NO_WINDOW)
             overlay_errors = []
@@ -395,8 +398,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
            progress=lambda value: None, cancel: Event | None = None,
            telemetry_overlay: bool = False, overlay_scene: Path | None = None, overlay_mode="four",
            include_videos: set[str] | None = None, crops: dict[str, Choice] | None = None,
-           overlap_only: bool = True) -> Path:
+           overlap_only: bool = True, audio_source: str = "vbox") -> Path:
     cancel = cancel or Event()
+    if audio_source not in ("vbox", "gopro"):
+        raise TelemetryError("Choose VBOX or GoPro sound")
     rotations = rotations or {}
     crops = crops or {}
     for mode in crops.values():
@@ -442,8 +447,36 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         selected[video.path.name] = choice
     settings = {"version": __version__, "rotations": selected, "max_size": max_size, "encoder": encoder,
                 "included_videos": [v.path.name for v in used], "overlap_only": overlap_only}
+    # Check the scan before reading linked media or preparing an overlay.
+    for name, info in scan.fingerprints.items():
+        if fingerprint(scan.folder / name) != info:
+            raise TelemetryError(f"Source changed since scan: {name}; scan again")
     parts = {v.path.name: video_parts(v, scan.matches, overlap_only) for v in used}
     settings["video_ranges"] = {name: [part.summary() for part in clips] for name, clips in parts.items()}
+    audio_plans, sound_sources = {}, {}
+    settings["audio_source"] = audio_source
+    if audio_source == "vbox":
+        log("Matching VBOX sound to the GoPro GPS clock")
+        audio_cache = {}
+        for video in used:
+            linked = [m for m in scan.matches if m.video is video]
+            plans = []
+            for part in parts[video.path.name]:
+                if cancel.is_set(): raise InterruptedError("Cancelled")
+                plan = plan_audio(part.video, linked, audio_cache)
+                plans.append(plan)
+                for path, stamp in plan.sources.items():
+                    info = fingerprint(path)
+                    if {k: info[k] for k in ("size", "mtime_ns")} != stamp:
+                        raise TelemetryError(f"Sound source changed: {path.name}; scan again")
+                    reference = scan.crop_references.get(video.path.name)
+                    if reference and path.name in reference.sources and reference.sources[path.name] != stamp:
+                        raise TelemetryError(f"Original VBOX video changed since scan: {path.name}; scan again")
+                    sound_sources[path.name] = info
+                for note in plan.notes: log(note)
+            audio_plans[video.path.name] = plans
+        settings["audio"] = {"sources": sound_sources,
+                             "plans": {name: [p.summary() for p in plans] for name, plans in audio_plans.items()}}
     crop_rectangles, crop_settings, cache = {}, {}, {}
     for video in used:
         name = video.path.name
@@ -526,10 +559,23 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     # Reuse artwork and full-session lap history, but draw at the
                     # GPS time corresponding to this clip's new zero point.
                     renderer.video = video
+                sound = None
+                audio_plan = None
+                if audio_source == "vbox":
+                    part_index = parts[video.path.name].index(part)
+                    audio_plan = audio_plans[video.path.name][part_index]
+                    sound = staging / (dest.stem + ".audio.wav")
+                    log(f"Preparing aligned sound for {video.path.name}")
+                    render_audio(audio_plan, sound, cancel,
+                                 lambda p: progress((duration_done + p*video.duration*.03) / duration_total*.93))
                 backend = encode(video, dest, rotation, max_size, encoder, log,
-                                 lambda p: progress((duration_done + p * video.duration) / duration_total * .93), cancel,
+                                 lambda p: progress((duration_done + (.03+.94*p if sound else p) * video.duration) / duration_total * .93), cancel,
                                  overlay=renderer, crop=crop_rectangles.get(video.path.name),
-                                 source_start=part.start if overlap_only else None)
+                                 source_start=part.start if overlap_only else None, mute=sound is not None)
+                audio_checked = {"source": "gopro"}
+                if sound:
+                    log("Attaching and verifying the aligned sound")
+                    audio_checked = attach_audio(dest, sound, video.duration, cancel)
                 checked = validate_video(video, dest, rotation, max_size, crop_rectangles.get(video.path.name), part.frames)
                 video_files[index] = filename
                 preview_time = min(30, video.duration / 2)
@@ -541,7 +587,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                 preview(dest, preview_time, 0, staging / preview_name)
                 report["media"].append({"file": filename, "source": video.path.name, "rotation_clockwise": selected[video.path.name],
                                          "encoder": backend, "preview": preview_name, "verification": checked,
-                                         "crop": crop_settings.get(video.path.name), "range": part.summary()})
+                                         "crop": crop_settings.get(video.path.name), "range": part.summary(),
+                                         "audio": audio_checked | ({"plan": audio_plan.summary()} if audio_plan else {})})
                 duration_done += video.duration
             for vbo in scan.vbos:
                 entries = []
@@ -583,6 +630,9 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         for name, info in scan.fingerprints.items():
             if fingerprint(scan.folder / name) != info:
                 raise TelemetryError(f"Source changed during export: {name}")
+        for name, info in sound_sources.items():
+            if fingerprint(scan.folder / name) != info:
+                raise TelemetryError(f"Sound source changed during export: {name}")
         for setting in crop_settings.values():
             for name, stamp in setting["reference"]["sources"].items():
                 stat = (scan.folder / name).stat()
@@ -662,6 +712,16 @@ def write_report(report: dict, path: Path):
             warnings.append("Scene elements omitted: " + ", ".join(overlay_info["omitted_elements"]))
     if report.get("excluded_videos"):
         warnings.append("Not selected for processing: " + ", ".join(report["excluded_videos"]))
+    for media in report.get("media", []):
+        audio = media.get("audio", {})
+        plan = audio.get("plan", {})
+        sound_files = list(dict.fromkeys(s["source"] for s in plan.get("segments", []) if s["source"]))
+        if sound_files:
+            warnings.append(f"Sound for {media['file']}: " + ", ".join(sound_files) + ".")
+        warnings.extend(plan.get("notes", []))
+        for clock in plan.get("clocks", []):
+            warnings.append(f"{clock['video']}: sound aligned using {clock['anchors']} video timestamps; "
+                            f"95% timing residual {clock['residual_p95_ms']:.1f} ms, with clock drift accounted for.")
     notes = "".join(f"<li>{e(w)}</li>" for w in dict.fromkeys(warnings)) or "<li>No additional issues.</li>"
     details = "".join(f'<tr><td>{e(m["video"])}</td><td>{e(m["vbo"])}</td><td>{m["position_median_m"]:.2f} m</td>'
                       f'<td>{m["speed_median_kmh"]:.2f} km/h</td></tr>' for m in report["matches"] if m["position_median_m"] is not None)

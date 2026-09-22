@@ -2,9 +2,11 @@
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import tkinter as tk
+import json
 import unittest
 
 from PIL import Image
@@ -107,6 +109,29 @@ class RotationDefaultTests(unittest.TestCase):
             app.select_video()
             app.rotation.set.assert_called_with('180°')
             app.load_preview.assert_called_with(clip, 180)
+
+
+class SoundPreferenceTests(unittest.TestCase):
+    def test_default_persistence_and_busy_state(self):
+        with TemporaryDirectory() as folder, patch('goprovbox.gui.data_directory', return_value=Path(folder)):
+            settings = Path(folder)/'settings.json'
+            settings.write_text(json.dumps({'welcomed': True}))
+            for expected in ('VBOX (GoPro for gaps)', 'GoPro'):
+                root = tk.Tk(); root.withdraw()
+                try:
+                    app = App(root)
+                    self.assertEqual(app.audio_source.get(), expected)
+                    app.set_busy(True); self.assertTrue(app.sound_combo.instate(['disabled']))
+                    app.set_busy(False); self.assertTrue(app.sound_combo.instate(['readonly']))
+                    root.geometry('880x740'); root.update_idletasks()
+                    # The added option fits the minimum window width.
+                    self.assertLess(app.sound_combo.winfo_x()+app.sound_combo.winfo_reqwidth(), 830)
+                    app.audio_source.set('GoPro'); app.save_preferences()
+                    self.assertEqual(json.loads(settings.read_text())['audio_source'], 'gopro')
+                    app.temporary.cleanup()
+                finally:
+                    for callback in root.tk.call('after', 'info'): root.after_cancel(callback)
+                    root.destroy()
 
 
 if __name__ == '__main__':

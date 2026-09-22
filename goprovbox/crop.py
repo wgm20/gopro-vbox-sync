@@ -105,24 +105,29 @@ def display_aspect(metadata: dict) -> Fraction:
         raise TelemetryError("Cannot read the original VBOX video's display shape") from exc
 
 
+def video_reference(vbo):
+    start = next(i for i, line in enumerate(vbo.preamble) if line.strip().lower() == "[avi]") + 1
+    values = []
+    for line in vbo.preamble[start:]:
+        if line.strip().startswith("["):
+            break
+        if line.strip():
+            values.append(line.strip())
+    if len(values) != 2:
+        raise TelemetryError(f"{vbo.path.name}: cannot read its original video reference")
+    prefix, extension = values
+    extension = extension.lstrip(".")
+    if any(c in prefix + extension for c in '/\\:') or extension.lower() not in ("mp4", "avi", "mov"):
+        raise TelemetryError(f"{vbo.path.name}: original video must be in the recordings folder")
+    return prefix, extension
+
+
 def original_paths(matches) -> list[Path]:
     """Resolve only linked, overlapping chapters in the VBO's own folder."""
     paths = set()
     for match in matches:
         vbo = match.vbo
-        start = next(i for i, line in enumerate(vbo.preamble) if line.strip().lower() == "[avi]") + 1
-        values = []
-        for line in vbo.preamble[start:]:
-            if line.strip().startswith("["):
-                break
-            if line.strip():
-                values.append(line.strip())
-        if len(values) != 2:
-            raise TelemetryError(f"{vbo.path.name}: cannot read its original video reference")
-        prefix, extension = values
-        extension = extension.lstrip(".")
-        if any(c in prefix + extension for c in '/\\:') or extension.lower() not in ("mp4", "avi", "mov"):
-            raise TelemetryError(f"{vbo.path.name}: original video must be in the recordings folder")
+        prefix, extension = video_reference(vbo)
         index = vbo.index("avifileindex")
         indices = {int(float(row.values[index])) for row in match.rows if float(row.values[index]) > 0}
         files = {p.name.casefold(): p for p in vbo.path.parent.iterdir() if p.is_file()}

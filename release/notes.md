@@ -1,8 +1,8 @@
 Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry.
 
-**Updated in 1.5.0b5:** Scene readouts now round whole-number speed, RPM, throttle and brake values instead of truncating their decimal part. This matches observed VBOX recorder displays, for example 6079.75 RPM becomes 6080 and 110.899 mph becomes 111. The change applies to both scene modes. Logged telemetry, GPS alignment, gauge-bar values and decimal readouts retain their original precision. The FFmpeg 7 timing fix from 1.5.0b4 is included.
+**Updated in 1.6.0b1:** Output now uses sound from your original VBOX video by default. Keep the VBOX MP4 files beside their VBO files. Sound is aligned through the VBO video references and GoPro GPS clock, including prebuffer, trimmed clips, chapter changes and clock drift. The **Sound** choice lets you select GoPro instead. GoPro sound fills missing VBOX coverage; the report identifies any fallback periods. Sound timing is tested using decoded recordings, including the end of each clip. The scene rounding and FFmpeg 7 fixes are included.
 
-**Start here:** download **GoPro-VBOX-Sync-1.5.0b5-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b1-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. The issue remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved.
 
