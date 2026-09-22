@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.5.0b4 — reliable frame timing with older video tools
+
+- Fixes custom-crop/overlay exports rejected with “Encoded video frame rate differs from the source” under FFmpeg 7.
+- Supplies the encoder frame timebase and each packet’s duration explicitly, preserving presentation/decode timestamps and B-frame order. Keeps strict frame-rate and frame-count validation.
+- Adds real-video regression tests for complete final-frame timing, decoded frame order, integer/fractional rates, rotation, full-length and trimmed exports. Runs the full test suite with both FFmpeg 7.1.1 and 8.1.2.
+
 ## 1.5.0b3 — drag to frame your video
 
 - Replaces the fixed GUI crop positions with **Frame & preview…**: drag a crop box over the full source image while watching the finished output, including the selected overlay.

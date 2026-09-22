@@ -12,6 +12,9 @@ permissions:
 jobs:
   test:
     runs-on: windows-latest
+    strategy:
+      matrix:
+        video-tools: [current, legacy-7.1.1]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -22,6 +25,18 @@ jobs:
         run: |
           python -c "from goprovbox.distribution import download_tools; download_tools()"
           python -c "from goprovbox.distribution import tools_directory; print(tools_directory())" >> $env:GITHUB_PATH
+      - name: Exercise FFmpeg 7 compatibility
+        if: matrix.video-tools == 'legacy-7.1.1'
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'ffmpeg-7.1.1.zip'
+          Invoke-WebRequest 'https://github.com/GyanD/codexffmpeg/releases/download/7.1.1/ffmpeg-7.1.1-essentials_build.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '04861d3339c5ebe38b56c19a15cf2c0cc97f5de4fa8910e4d47e5e6404e4a2d4') { throw 'Legacy tools integrity check failed' }
+          $destination = Join-Path $env:RUNNER_TEMP 'legacy-video-tools'
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination
+          $bin = Join-Path $destination 'ffmpeg-7.1.1-essentials_build/bin'
+          "GOPROVBOX_FFMPEG=$bin/ffmpeg.exe" >> $env:GITHUB_ENV
+          "GOPROVBOX_FFPROBE=$bin/ffprobe.exe" >> $env:GITHUB_ENV
+          $bin >> $env:GITHUB_PATH
       - run: python -m unittest discover -s tests -v
 
   release:

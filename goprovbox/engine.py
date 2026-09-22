@@ -291,8 +291,15 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
     args += codec_args
     if source_start is not None:
         args += ["-frames:v", str(round(video.duration * Fraction(video.fps))), "-t", f"{video.duration:.9f}"]
-    # Preserve frame cadence; one-second GOP makes Circuit Tools seeking responsive.
-    args += ["-fps_mode", "passthrough", "-g", str(max(1, round(float(Fraction(video.fps))))),
+    # FFmpeg 7 loses the frame-rate hint through overlay and can leave the last
+    # MP4 sample with zero duration. Give the encoder a frame timebase and write
+    # every packet's duration explicitly, retaining both PTS and DTS (including
+    # B-frame reordering). Passthrough still preserves the source frame cadence.
+    fps = Fraction(video.fps)
+    frame_time = f"{fps.denominator}/{fps.numerator}"
+    args += ["-fps_mode", "passthrough", "-enc_time_base:v", frame_time,
+             "-bsf:v", f"setts=pts=PTS:dts=DTS:duration={frame_time}/TB",
+             "-g", str(max(1, round(float(fps)))),
              "-c:a", "aac", "-b:a", "192k", "-metadata:s:v:0", "rotate=0",
              "-color_range", "tv", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(destination)]
     return args
