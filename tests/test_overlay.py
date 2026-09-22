@@ -92,6 +92,31 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(im.getpixel((95,20)),(255,0,0,255))
         self.assertEqual(im.getpixel((95,5))[3],0)
 
+    def test_scene_number_rounding_keeps_decimal_formats_and_signed_values(self):
+        from goprovbox.overlay import scene_number
+        for fmt,value,expected in [('%03d',110.899,'111'),('%04d',6079.75,'6080'),
+                                   ('%03d',387.9308,'388'),('%+03d',-1.6,'-02'),
+                                   ('%03d',.9434,'001'),('%04.2f',1.234,'1.23'),
+                                   ('%+05.2f',-1.634,'-1.63'),('%03d',None,'--')]:
+            with self.subTest(fmt=fmt,value=value):
+                self.assertEqual(scene_number(fmt,value),expected)
+
+    def test_four_channel_scene_draws_rounded_readouts(self):
+        class ReadFont(dict):
+            def __init__(self,original):
+                super().__init__(original);self.read=[]
+            def get(self,key,*args):
+                if key!='-':self.read.append(key)
+                return super().get(key,*args)
+        speed=next(e for e in self.scene.elements if e.get('key')=='speed')
+        rpm=next(e for e in self.scene.elements if e.get('key')=='rpm')
+        speed['font']=ReadFont(speed['font']);rpm['font']=ReadFont(rpm['font'])
+        renderer=Renderer(self.clip,[self.match],320,180,self.scene)
+        with patch.object(renderer.timeline,'at',return_value={'speed':110.899,'rpm':6079.75,'throttle':.9434,'brake':387.9308}):
+            renderer.frame(1.5)
+        self.assertEqual(''.join(speed['font'].read),'111')
+        self.assertEqual(''.join(rpm['font'].read),'6080')
+
     def test_invalid_scenes_do_not_silently_guess(self):
         members=scene_members(); members["SCENE.XML"]=members["SCENE.XML"].replace(b'<text name="rpm"',b'<gauge name="rpm"')
         with self.assertRaisesRegex(TelemetryError,"gauge widget"):

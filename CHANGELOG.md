@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.5.0b5 — round scene readouts correctly
+
+- Rounds whole-number text in both four-channel and full-scene overlays, matching observed recorder readouts instead of truncating fractional values.
+- Retains full precision in telemetry, interpolation and gauge bars; decimal text formatting and GPS/video alignment are unchanged.
+- Tests rendered readouts for speed and RPM, other numeric formats, missing readings and unchanged timeline values.
+
 ## 1.5.0b4 — reliable frame timing with older video tools
 
 - Fixes custom-crop/overlay exports rejected with “Encoded video frame rate differs from the source” under FFmpeg 7.

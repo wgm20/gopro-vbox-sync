@@ -1,8 +1,8 @@
 Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry.
 
-**Updated in 1.5.0b4:** Fixes the “Encoded video frame rate differs from the source” error when exporting cropped video with overlays using FFmpeg 7. The exporter now writes complete frame timing while retaining the original frame sequence and audio alignment. Tests cover both FFmpeg 7.1.1 and 8.1.2, including custom crops, overlays, rotation, fractional frame rates and trimmed clips. Drag-to-frame previews and the default upright rotation remain available.
+**Updated in 1.5.0b5:** Scene readouts now round whole-number speed, RPM, throttle and brake values instead of truncating their decimal part. This matches observed VBOX recorder displays, for example 6079.75 RPM becomes 6080 and 110.899 mph becomes 111. The change applies to both scene modes. Logged telemetry, GPS alignment, gauge-bar values and decimal readouts retain their original precision. The FFmpeg 7 timing fix from 1.5.0b4 is included.
 
-**Start here:** download **GoPro-VBOX-Sync-1.5.0b4-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
+**Start here:** download **GoPro-VBOX-Sync-1.5.0b5-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. The issue remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved.
 

@@ -50,6 +50,19 @@ def datasource(text):
     return parts[0], scale
 
 
+def scene_number(fmt, value):
+    """Round integer readouts; Python's %d otherwise truncates logged floats.
+
+    Original HD2 overlays round values such as 6079.75 RPM to 6080 and
+    111.66 mph to 112. Only the text changes, not telemetry or gauge levels.
+    """
+    if value is None:
+        return "--"
+    if fmt[-1] in "di":
+        value = math.floor(value + .5) if value >= 0 else math.ceil(value - .5)
+    return fmt % value
+
+
 def read_scene_archive(path: Path) -> dict[str, bytes]:
     if path.stat().st_size > MAX_ARCHIVE:
         raise TelemetryError("Scene file exceeds the 32 MB limit")
@@ -340,7 +353,7 @@ class FourChannelRenderer:
                         if n:
                             draw.rectangle((x+bx, y+by+h-n, x+bx+w-1, y+by+h-1) if mode == "bottom_top_min" else (x+bx, y+by, x+bx+n-1, y+by+h-1), fill=colour)
                 elif e["kind"] == "text":
-                    text = e["fmt"] % values[e["key"]]
+                    text = scene_number(e["fmt"], values[e["key"]])
                     glyphs = [e["font"].get(c, e["font"].get("-")) for c in text]
                     tw = sum(g.width for g in glyphs); th = max(g.height for g in glyphs)
                     box = Image.new("RGBA", e["size"])

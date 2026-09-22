@@ -8,7 +8,7 @@ import re
 from PIL import Image, ImageDraw, ImageFilter
 
 from .gpmf import TelemetryError
-from .overlay import parse_scene, scene_xml, numbers, datasource, FourChannelRenderer, Timeline
+from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, FourChannelRenderer, Timeline
 from .lapdata import Session
 
 
@@ -193,7 +193,7 @@ class FullSceneRenderer(FourChannelRenderer):
             text=f"{cs//6000:02d}:{cs//100%60:02d}.{cs%100:02d}" if cs is not None else "--:--.--"
         elif e["fmtfn"]=="time_hm":
             text=f"{int(value)//3600000%24:02d}:{int(value)//60000%60:02d}" if value is not None else "--:--"
-        else:text=e["fmt"]%value if value is not None else "--"
+        else:text=scene_number(e["fmt"],value)
         cache=self.text_cache.get(e["name"])
         if cache and cache[0]==text:return cache[1]
         glyphs=[e["font"].get(c,e["font"].get("-")) for c in text]

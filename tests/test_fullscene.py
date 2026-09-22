@@ -115,6 +115,21 @@ class FullSceneTests(unittest.TestCase):
         renderer=Renderer(self.clip,[self.match],320,180,self.scene)
         self.assertEqual(renderer.frame(30).size,(320,180))
 
+    def test_integer_readouts_round_like_recorder_without_changing_timeline(self):
+        renderer=Renderer(self.clip,[self.match],320,180,self.scene)
+        before=renderer.timeline.at(BASE+30).copy()
+        element=next(e for e in renderer.elements if e['name']=='rpm')
+        for value,expected in ((6079.75,'6080'),(6151.5,'6152'),(6103.49,'6103')):
+            with self.subTest(value=value):
+                renderer.text_image(element,value)
+                self.assertEqual(renderer.text_cache['rpm'][0],expected)
+        element=next(e for e in renderer.elements if e['name']=='speed')
+        for value,expected in ((110.899,'111'),(111.66,'112'),(110.43,'110'),(None,'--')):
+            with self.subTest(value=value):
+                renderer.text_image(element,value)
+                self.assertEqual(renderer.text_cache['speed'][0],expected)
+        self.assertEqual(renderer.timeline.at(BASE+30),before)
+
     def test_full_mode_requires_a_scene(self):
         scan=Scan(self.folder,[self.clip],[self.vbo],[self.match],[],[],{})
         with self.assertRaisesRegex(TelemetryError,'Choose a VBOX scene'):
