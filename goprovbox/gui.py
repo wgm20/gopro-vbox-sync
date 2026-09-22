@@ -68,6 +68,7 @@ class App:
         self.rotation = tk.StringVar()
         self.crop_choice = tk.StringVar(value="No crop")
         self.crop_note = tk.StringVar()
+        self.overlap_only = tk.BooleanVar(value=prefs.get("overlap_only", True))
         self.overlay_mode = tk.StringVar(value=prefs.get("overlay_mode", "Driving data" if prefs.get("overlay_enabled") else "None"))
         if self.overlay_mode.get() not in OVERLAYS: self.overlay_mode.set("None")
         self.scene_path = tk.StringVar(value=prefs.get("scene_path", ""))
@@ -150,6 +151,9 @@ class App:
         ttk.Label(options, text="Overlay").pack(side="left",padx=(24,10))
         self.overlay_combo = ttk.Combobox(options, textvariable=self.overlay_mode, values=list(OVERLAYS), state="readonly", width=31)
         self.overlay_combo.pack(side="left"); self.overlay_combo.bind("<<ComboboxSelected>>", self.overlay_changed)
+        self.trim_check = ttk.Checkbutton(main, text="Only export video with VBOX data", variable=self.overlap_only,
+                                         command=self.quality_changed)
+        self.trim_check.pack(anchor="w", pady=(0,10))
         self.scenerow = ttk.Frame(main)
         ttk.Label(self.scenerow, text="Scene", width=9).pack(side="left")
         self.scene_entry = ttk.Entry(self.scenerow, textvariable=self.scene_path)
@@ -311,10 +315,14 @@ class App:
         name = "GoPro Circuit Tools Overlay" if OVERLAYS[self.overlay_mode.get()] != "none" else "GoPro Circuit Tools"
         if any(mode != "none" for key, mode in self.crops.items() if key in self.included_videos):
             name += " Cropped"
+        if self.overlap_only.get():
+            name += " Matched"
         return name
 
     def quality_changed(self, *_):
-        defaults = {str(Path(self.folder.get()) / (name + suffix)) for name in ("GoPro Circuit Tools", "GoPro Circuit Tools Original", "GoPro Circuit Tools Overlay") for suffix in ("", " Cropped")}
+        defaults = {str(Path(self.folder.get()) / (name + suffix + trimmed))
+                    for name in ("GoPro Circuit Tools", "GoPro Circuit Tools Original", "GoPro Circuit Tools Overlay")
+                    for suffix in ("", " Cropped") for trimmed in ("", " Matched")}
         if self.folder.get() and self.output.get() in defaults:
             self.output.set(str(Path(self.folder.get()) / self.output_name()))
 
@@ -388,6 +396,7 @@ class App:
         for widget in (self.scan_button, self.browse, self.source_entry, self.output_entry, self.output_button):
             widget.configure(state="disabled" if busy else "normal")
         self.quality_combo.configure(state="disabled" if busy else "readonly")
+        self.trim_check.configure(state="disabled" if busy else "normal")
         self.overlay_combo.configure(state="disabled" if busy else "readonly")
         enabled = OVERLAYS[self.overlay_mode.get()] != "none" and not busy
         self.scene_entry.configure(state="normal" if enabled else "disabled")
@@ -509,6 +518,7 @@ class App:
             messagebox.showerror("Choose videos", "Tick at least one video to include in processing."); return
         rotations, size = dict(self.rotations), QUALITY[self.quality.get()]
         crops = dict(self.crops)
+        overlap_only = self.overlap_only.get()
         mode = OVERLAYS[self.overlay_mode.get()]
         overlay_enabled = mode != "none"
         scene = Path(self.scene_path.get().strip()) if overlay_enabled and self.scene_path.get().strip() else None
@@ -517,7 +527,7 @@ class App:
         self.status.set("Preparing video and data…")
         self.progress["value"] = 0
         self.worker(lambda: self.events.put(("complete", export(scan, output, rotations=rotations, max_size=size,
-            include_videos=included, crops=crops,
+            include_videos=included, crops=crops, overlap_only=overlap_only,
             telemetry_overlay=overlay_enabled, overlay_scene=scene, overlay_mode=mode if mode != "none" else "four",
             log=lambda m: self.events.put(("log", m)), progress=lambda v: self.events.put(("progress", v)), cancel=self.cancel))))
 
@@ -607,6 +617,7 @@ class App:
             self.preferences.parent.mkdir(parents=True, exist_ok=True)
             self.preferences.write_text(json.dumps({"folder": self.folder.get(), "quality": self.quality.get(),
                                                     "overlay_mode": self.overlay_mode.get(), "scene_path": self.scene_path.get(),
+                                                    "overlap_only": self.overlap_only.get(),
                                                     "welcomed": self.welcomed}), encoding="utf-8")
         except OSError:
             pass

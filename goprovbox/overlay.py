@@ -367,7 +367,7 @@ class FourChannelRenderer:
     def feed(self, pipe, cancel, errors):
         try:
             fps = Fraction(self.video.fps)
-            for n in range(math.ceil(self.video.duration * fps)):
+            for n in range(math.ceil(self.video.duration * fps - 1e-7)):
                 if cancel.is_set():
                     break
                 pipe.write(self.frame(float(n / fps)).tobytes())

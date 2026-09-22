@@ -24,6 +24,7 @@ from .gpmf import TelemetryError
 from .media import Video, inspect_video, probe, utc_text, executable, run, preview, rotation_filter, CREATE_NO_WINDOW, percentile
 from .vbo import VBO, Row, read_vbo, write_vbo
 from .crop import MODES as CROP_MODES, Reference, rectangle, reference_for
+from .trimming import video_parts
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
                          "Video playback, rotation and seeking were successful, but this intermittent VBO rejection remains unresolved.")
@@ -243,10 +244,11 @@ def dimensions(video: Video, rotation: int, max_size: int, crop=None):
     return max(2, round(w * factor / 2) * 2), max(2, round(h * factor / 2) * 2)
 
 
-def encode_args(video: Video, destination: Path, rotation: int, max_size: int, backend: str, overlay=None, crop=None):
+def encode_args(video: Video, destination: Path, rotation: int, max_size: int, backend: str, overlay=None, crop=None,
+                source_start: float | None = None):
     if backend == "copy":
-        if overlay is not None or crop is not None:
-            raise TelemetryError("Drawing gauges or cropping requires re-encoding; choose HD, Full resolution or Compact")
+        if overlay is not None or crop is not None or source_start is not None:
+            raise TelemetryError("Drawing gauges, cropping or trimming requires re-encoding; choose HD, Full resolution or Compact")
         return [executable("ffmpeg"), "-hide_banner", "-nostdin", "-n", "-display_rotation", str(-rotation),
                 "-noautorotate", "-i", str(video.path), "-map", "0:v:0", "-map", "0:a?",
                 "-c", "copy", "-map_metadata", "0", "-movflags", "+faststart",
@@ -255,6 +257,11 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
     args = [executable("ffmpeg"), "-hide_banner", "-nostdin", "-y"]
     if backend == "qsv" and crop is None:
         args += ["-hwaccel", "qsv", "-hwaccel_output_format", "qsv"]
+    if source_start is not None:
+        # Seek against the actual first video timestamp, even when audio or the
+        # container begins earlier. Round down to microseconds to keep this frame.
+        seek = math.floor((video.video_start + source_start) * 1e6) / 1e6
+        args += ["-seek_timestamp", "1", "-ss", f"{seek:.6f}"]
     args += ["-noautorotate", "-i", str(video.path)]
     if overlay is not None:
         args += ["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", f"{overlay.size[0]}x{overlay.size[1]}",
@@ -274,12 +281,16 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
         filt = ",".join(filters)
         codec_args = (["-c:v", "h264_qsv", "-global_quality", "20", "-look_ahead", "0"] if backend == "qsv"
                       else ["-c:v", "libx264", "-preset", "fast", "-crf", "18"])
+    if source_start is not None:
+        filt += ",setpts=PTS-STARTPTS"
     if overlay is not None:
         x, y = overlay.position
         args += ["-filter_complex", f"[0:v:0]{filt}[base];[base][1:v:0]overlay=x={x}:y={y}:eof_action=pass:repeatlast=0:format=auto,format=nv12[with_data]"]
     else:
         args += ["-vf", filt]
     args += codec_args
+    if source_start is not None:
+        args += ["-frames:v", str(round(video.duration * Fraction(video.fps))), "-t", f"{video.duration:.9f}"]
     # Preserve frame cadence; one-second GOP makes Circuit Tools seeking responsive.
     args += ["-fps_mode", "passthrough", "-g", str(max(1, round(float(Fraction(video.fps))))),
              "-c:a", "aac", "-b:a", "192k", "-metadata:s:v:0", "rotate=0",
@@ -288,13 +299,13 @@ def encode_args(video: Video, destination: Path, rotation: int, max_size: int, b
 
 
 def encode(video: Video, destination: Path, rotation: int, max_size: int, encoder: str,
-           log, progress, cancel: Event, overlay=None, crop=None) -> str:
+           log, progress, cancel: Event, overlay=None, crop=None, source_start: float | None = None) -> str:
     backends = ["qsv", "software"] if encoder == "auto" and os.name == "nt" else ["software" if encoder == "auto" else encoder]
     for backend in backends:
         log(f"Preparing {video.path.name}: {backend}, rotation {rotation}°, {dimensions(video, rotation, max_size, crop)}")
         logfile = destination.with_suffix(".encoding.log")
         with logfile.open("wb") as err:
-            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay, crop),
+            process = subprocess.Popen(encode_args(video, destination, rotation, max_size, backend, overlay, crop, source_start),
                 stdin=subprocess.PIPE if overlay is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE, stderr=err, creationflags=CREATE_NO_WINDOW)
             overlay_errors = []
@@ -350,7 +361,7 @@ def encode(video: Video, destination: Path, rotation: int, max_size: int, encode
     raise AssertionError("No encoder selected")
 
 
-def validate_video(video: Video, destination: Path, rotation: int, max_size: int, crop=None):
+def validate_video(video: Video, destination: Path, rotation: int, max_size: int, crop=None, frames=None):
     meta = probe(destination)
     v = next(s for s in meta["streams"] if s["codec_type"] == "video")
     expected = dimensions(video, rotation, max_size, crop)
@@ -362,6 +373,8 @@ def validate_video(video: Video, destination: Path, rotation: int, max_size: int
         raise TelemetryError("Encoded video does not start at time zero")
     if Fraction(v["avg_frame_rate"]) != Fraction(video.fps):
         raise TelemetryError("Encoded video frame rate differs from the source")
+    if frames is not None and int(v.get("nb_frames", 0)) != frames:
+        raise TelemetryError("Trimmed video has an unexpected number of frames")
     return {"codec": v["codec_name"], "dimensions": list(expected), "frames": v.get("nb_frames"),
             "duration": v["duration"], "size_bytes": destination.stat().st_size}
 
@@ -374,7 +387,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
            max_size: int = 1920, encoder="auto", video_mode="convert", log=lambda msg: None,
            progress=lambda value: None, cancel: Event | None = None,
            telemetry_overlay: bool = False, overlay_scene: Path | None = None, overlay_mode="four",
-           include_videos: set[str] | None = None, crops: dict[str, str] | None = None) -> Path:
+           include_videos: set[str] | None = None, crops: dict[str, str] | None = None,
+           overlap_only: bool = True) -> Path:
     cancel = cancel or Event()
     rotations = rotations or {}
     crops = crops or {}
@@ -402,6 +416,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
     default_name = "GoPro Circuit Tools Overlay" if telemetry_overlay else "GoPro Circuit Tools"
     if any(mode != "none" for mode in crops.values()):
         default_name += " Cropped"
+    if overlap_only:
+        default_name += " Matched"
     output = (output or scan.folder / default_name).resolve()
     source_folder = scan.folder.resolve()
     if output == source_folder or output in source_folder.parents:
@@ -418,7 +434,9 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
             raise TelemetryError(f"{video.path.name}: inspect the preview and choose a rotation before exporting")
         selected[video.path.name] = choice
     settings = {"version": __version__, "rotations": selected, "max_size": max_size, "encoder": encoder,
-                "included_videos": [v.path.name for v in used]}
+                "included_videos": [v.path.name for v in used], "overlap_only": overlap_only}
+    parts = {v.path.name: video_parts(v, scan.matches, overlap_only) for v in used}
+    settings["video_ranges"] = {name: [part.summary() for part in clips] for name, clips in parts.items()}
     crop_rectangles, crop_settings, cache = {}, {}, {}
     for video in used:
         name = video.path.name
@@ -465,7 +483,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                              "Choose a new output folder; existing results are never overwritten.")
     groups = recording_groups(used)
     output.parent.mkdir(parents=True, exist_ok=True)
-    estimate = sum(v.duration for v in used) * 8_000_000 + 512 * 1024 * 1024
+    duration_total = sum(part.video.duration for clips in parts.values() for part in clips)
+    estimate = duration_total * 8_000_000 + 512 * 1024 * 1024
     if shutil.disk_usage(output.parent).free < estimate:
         raise TelemetryError(f"Allow about {estimate / 1024**3:.1f} GB free for video preparation.")
     staging = output.parent / ("." + output.name + ".working-" + uuid.uuid4().hex[:8])
@@ -475,13 +494,14 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                               "compatibility_notes": [CT_COMPATIBILITY_NOTE]}
     names = set()
     try:
-        duration_total = sum(v.duration for v in used)
         duration_done = 0
         for group in groups:
             prefix = "GoPro_" + safe_stem(group[0].path.stem) + "_"
             avi_prefix = prefix
-            video_indices, video_files = {}, {}
-            for index, video in enumerate(group, 1):
+            group_parts = [part for video in group for part in parts[video.path.name]]
+            video_files = {}
+            for index, part in enumerate(group_parts, 1):
+                video = part.video
                 if cancel.is_set():
                     raise InterruptedError("Cancelled")
                 filename = f"{prefix}{index:04d}.mp4"
@@ -491,28 +511,35 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                 dest = staging / filename
                 preview_name = dest.stem + ".jpg"
                 rotation = selected[video.path.name]
+                renderer = renderers.get(video.path.name)
+                if renderer is not None:
+                    # Reuse artwork and full-session lap history, but draw at the
+                    # GPS time corresponding to this clip's new zero point.
+                    renderer.video = video
                 backend = encode(video, dest, rotation, max_size, encoder, log,
                                  lambda p: progress((duration_done + p * video.duration) / duration_total * .93), cancel,
-                                 overlay=renderers.get(video.path.name), crop=crop_rectangles.get(video.path.name))
-                checked = validate_video(video, dest, rotation, max_size, crop_rectangles.get(video.path.name))
-                video_indices[video.path.name] = index
+                                 overlay=renderer, crop=crop_rectangles.get(video.path.name),
+                                 source_start=part.start if overlap_only else None)
+                checked = validate_video(video, dest, rotation, max_size, crop_rectangles.get(video.path.name), part.frames)
                 video_files[index] = filename
                 preview_time = min(30, video.duration / 2)
-                if telemetry_overlay:
-                    first_match = next(m for m in scan.matches if m.video is video)
+                if overlap_only:
+                    preview_time = video.duration / 2
+                elif telemetry_overlay:
+                    first_match = next(m for m in scan.matches if m.video is part.source)
                     preview_time = video.clock.media_time((first_match.rows[0].utc + first_match.rows[-1].utc) / 2)
                 preview(dest, preview_time, 0, staging / preview_name)
                 report["media"].append({"file": filename, "source": video.path.name, "rotation_clockwise": selected[video.path.name],
                                          "encoder": backend, "preview": preview_name, "verification": checked,
-                                         "crop": crop_settings.get(video.path.name)})
+                                         "crop": crop_settings.get(video.path.name), "range": part.summary()})
                 duration_done += video.duration
             for vbo in scan.vbos:
                 entries = []
-                for video in group:
-                    index = video_indices[video.path.name]
+                for index, part in enumerate(group_parts, 1):
                     for match in scan.matches:
-                        if match.video is video and match.vbo is vbo:
-                            entries.extend((row, video.clock.media_time(row.utc), index) for row in match.rows)
+                        if match.video is part.source and match.vbo is vbo:
+                            entries.extend((row, part.source.clock.media_time(row.utc) - part.start, index)
+                                           for row in match.rows if part.contains(row.utc))
                 if not entries:
                     continue
                 entries.sort(key=lambda entry: (entry[0].utc, entry[2]))
@@ -537,7 +564,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     names.add(filename.casefold())
                     rs, ts, indices = map(list, zip(*chunk))
                     write_vbo(vbo, rs, ts, avi_prefix, staging / filename, indices)
-                    verify_vbo(staging / filename, vbo, rs, ts, indices, {video_indices[v.path.name]: v for v in group})
+                    verify_vbo(staging / filename, vbo, rs, ts, indices, {i: p.video for i, p in enumerate(group_parts, 1)})
                     report["outputs"].append({"file": filename, "source": vbo.path.name, "samples": len(rs),
                         "utc_start": utc_text(rs[0].utc), "utc_end": utc_text(rs[-1].utc),
                         "overlap_seconds": rs[-1].utc - rs[0].utc,
@@ -557,8 +584,9 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         write_report(report, staging / "Report.html")
         (staging / "OPEN IN CIRCUIT TOOLS.txt").write_text(
             "Open the GoPro_*.vbo files in Circuit Tools 3. Keep generated MP4 files beside them.\n"
-            "Original telemetry channels and lap markers are retained. Only overlapping telemetry is exported.\n"
-            "Video covers the full GoPro chapter; VBOX video times seek into the matching portion.\n"
+            "Original telemetry channels and lap markers are retained. Only overlapping telemetry is exported.\n" +
+            ("Video contains only matched periods; VBOX video times start in each trimmed clip.\n" if overlap_only else
+             "Video covers the full GoPro chapter; VBOX video times seek into the matching portion.\n") +
             "See Report.html for matches, orientation, skipped files and validation.\n", encoding="utf-8")
         if cancel.is_set():
             raise InterruptedError("Cancelled")
@@ -597,13 +625,23 @@ def write_report(report: dict, path: Path):
             return "No crop"
         mode = {"top": "cut off top", "bottom": "cut off bottom", "centre": "centre crop"}[crop["mode"]]
         return "VBOX " + crop["reference"]["aspect"] + " · " + mode
+    def range_description(media):
+        span = media.get("range")
+        if not span:
+            return ""
+        def stamp(seconds):
+            return f"{int(seconds // 60):02d}:{seconds % 60:04.1f}"
+        return f'<p>Source {stamp(span["source_start_seconds"])}–{stamp(span["source_end_seconds"])} · {span["duration_seconds"]:.1f} seconds</p>'
     rows = "".join(f'<tr><td><a href="{e(o["file"])}">{e(o["file"])}</a></td><td>{o["overlap_seconds"] / 60:.2f} min</td>'
                    f'<td>{o["samples"]:,}</td><td>{e(o["utc_start"])}<br>{e(o["utc_end"])}</td></tr>' for o in report["outputs"])
     cards = "".join(f'<article><img src="{e(m.get("preview", Path(m["file"]).stem + ".jpg"))}"><h3>{e(m["source"])}</h3>'
                     f'<p>Rotation: {m["rotation_clockwise"]}° clockwise · {m["verification"]["dimensions"][0]} × '
                     f'{m["verification"]["dimensions"][1]} · {e(m["verification"]["codec"].upper())}</p>'
-                    f'<p>{e(crop_description(m))} · Encoded to H.264</p></article>' for m in report["media"])
+                    f'<p>{e(crop_description(m))} · Encoded to H.264</p>{range_description(m)}</article>' for m in report["media"])
     storage_note = "Keep their MP4 files beside them."
+    coverage_note = ("Only periods with matching VBOX data are retained, including their boundary frames. Separate periods use separate clips."
+                     if report.get("settings", {}).get("overlap_only") else
+                     "Full video chapters are retained; the VBO links only to valid overlapping samples.")
     warnings = report.get("compatibility_notes", []) + report["errors"] + [w for v in report["videos"] for w in v["warnings"]] + [w for m in report["matches"] for w in m["warnings"]]
     overlay_info = report.get("settings", {}).get("overlay")
     if overlay_info:
@@ -626,8 +664,7 @@ a{{color:#087d70}}.cards{{display:flex;gap:24px;flex-wrap:wrap}}article{{backgro
 img{{width:100%;max-width:480px}}.note{{background:#e2efea;padding:18px;border-radius:8px}}small{{color:#576375}}code{{overflow-wrap:anywhere}}
 </style><main><div class="eyebrow">GOPRO VBOX SYNC · {__version__}</div><h1>Export prepared</h1>
 <p>GPS-matched GoPro video with your original VBOX telemetry.</p><p class="note">Open the <b>.vbo</b> files below in Circuit Tools 3.
-{storage_note} Original recordings are unchanged. Video before or after the telemetry overlap is retained;
-the VBO links only to valid overlapping samples.</p><p><strong>Circuit Tools compatibility:</strong> {e(CT_COMPATIBILITY_NOTE)}</p>
+{storage_note} Original recordings are unchanged. {coverage_note}</p><p><strong>Circuit Tools compatibility:</strong> {e(CT_COMPATIBILITY_NOTE)}</p>
 <table><thead><tr><th>Open this file</th><th>Overlap</th><th>Samples</th><th>UTC interval</th></tr></thead><tbody>{rows}</tbody></table>
 <h2>Orientation & video</h2><div class="cards">{cards}</div><h2>Independent GPS checks</h2>
 <p>Median differences between GoPro GPS and interpolated VBOX measurements confirm the recording match. These differences include receiver accuracy and sensor latency.</p>

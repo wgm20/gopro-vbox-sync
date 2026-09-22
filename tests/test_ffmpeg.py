@@ -24,7 +24,7 @@ class FFmpegIntegrationTests(unittest.TestCase):
             clip = video(source,duration=3,rotation=270)
             fingerprints = {p.name:fingerprint(p) for p in (source,vbo.path)}
             scan = Scan(folder,[clip],[vbo],intersections(vbo,clip),[],[],fingerprints)
-            result = export(scan,folder / "output",encoder="software")
+            result = export(scan,folder / "output",encoder="software",overlap_only=False)
             report = json.loads((result / "report.json").read_text())
             self.assertEqual(report["status"],"complete")
             movie = result / report["media"][0]["file"]
@@ -35,12 +35,12 @@ class FFmpegIntegrationTests(unittest.TestCase):
             offset = (10 * 80 + 10) * 3
             red, green, blue = pixels[offset:offset+3]
             self.assertGreater(green,red+50); self.assertGreater(green,blue+50)
-            self.assertEqual(export(scan,result,encoder="software"),result)
+            self.assertEqual(export(scan,result,encoder="software",overlap_only=False),result)
             self.assertEqual({p.name:fingerprint(p) for p in (source,vbo.path)},fingerprints)
             output_vbo = result / report["outputs"][0]["file"]
             output_vbo.write_bytes(output_vbo.read_bytes()+b"\n")
             with self.assertRaisesRegex(TelemetryError,"already exists"):
-                export(scan,result,encoder="software")
+                export(scan,result,encoder="software",overlap_only=False)
 
 
 if __name__ == "__main__":

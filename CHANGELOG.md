@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.5.0b2 — export only matching periods
+
+- Adds **Only export video with VBOX data**, enabled by default. The app remembers the choice; untick it to retain full videos. The command-line equivalent is `--full-video`.
+- Trims to matching periods with frame-aligned boundaries. Separate periods become separate numbered clips; continuous GoPro chapters retain their linked VBO data.
+- Rebases VBOX video times and overlay playback to each clip while retaining GPS clock drift and full-session lap history. Audio is trimmed with the video.
+- Uses the shorter duration for progress, space estimates and report ranges. The default folder ends in `Matched`, keeping earlier full-video exports separate.
+- Tests first/last frame contents, sound alignment, telemetry gaps, fractional frame rates, nonzero source timestamps, adjacent chapters, cropping/overlays, opt-out and reruns.
+
 ## 1.5.0b1 — VBOX-shaped video cropping
 
 - Adds a Crop choice for each GoPro video: No crop, cut off top, cut off bottom, or centre crop. The preview pane updates when the choice changes.

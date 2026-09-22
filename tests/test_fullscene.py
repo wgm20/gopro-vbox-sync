@@ -139,7 +139,7 @@ class FullSceneTests(unittest.TestCase):
         match=Match(vbo,clip,vbo.rows[10:21],0,0)
         scan=Scan(self.folder,[clip],[vbo],[match],[],[],{p.name:fingerprint(p) for p in (clip.path,vbo.path)})
         with patch('goprovbox.overlay.load_scene',return_value=self.scene) as load:
-            result=export(scan,self.folder/'out',overlay_scene=self.folder/'scene.vvhsn',overlay_mode='full',encoder='software')
+            result=export(scan,self.folder/'out',overlay_scene=self.folder/'scene.vvhsn',overlay_mode='full',encoder='software',overlap_only=False)
             load.assert_called_once_with(self.folder/'scene.vvhsn',mode='full')
         report=json.loads((result/'report.json').read_text())
         self.assertEqual(report['settings']['overlay']['mode'],'full')

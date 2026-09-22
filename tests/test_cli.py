@@ -12,6 +12,13 @@ from tests.test_core import video
 
 
 class CLITests(unittest.TestCase):
+    def test_overlap_only_is_default_and_full_video_opts_out(self):
+        scan = Scan(Path('.'), [], [], [], [], [], {})
+        for args, expected in [([], True), (['--full-video'], False)]:
+            with patch('goprovbox.__main__.scan_folder', return_value=scan), patch('goprovbox.__main__.export') as dispatch:
+                self.assertEqual(main(['recordings'] + args), 0)
+            self.assertEqual(dispatch.call_args.kwargs['overlap_only'], expected)
+
     def test_crop_option_reaches_export_for_each_video(self):
         clip = video(Path('clip.mp4'))
         scan = Scan(Path('.'), [clip], [], [], [], [], {})

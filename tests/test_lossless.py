@@ -72,7 +72,7 @@ class LosslessTests(unittest.TestCase):
         second = self.folder / "GX020493.mp4"
         shutil.copyfile(self.source, second)
         clips = [video(self.source, duration=3), video(second, start=BASE+3, duration=3)]
-        result = export(self.scan(clips), self.folder / "chapters", encoder="software")
+        result = export(self.scan(clips), self.folder / "chapters", encoder="software", overlap_only=False)
         report = json.loads((result / "report.json").read_text())
         self.assertEqual(len(report["outputs"]), 1)
         self.assertEqual(len(report["outputs"][0]["videos"]), 2)

@@ -53,6 +53,7 @@ class SelectionTests(unittest.TestCase):
         app.quality = Mock(); app.quality.get.return_value = 'HD · 1920 px'
         app.overlay_mode = Mock(); app.overlay_mode.get.return_value = 'None'
         app.rotations = {}; app.crops = {'GX010002.mp4': 'top'}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
+        app.overlap_only = Mock(); app.overlap_only.get.return_value = True
         app.events = queue.Queue(); app.worker = Mock()
         app.selected_video = Mock(return_value=self.clips[0])
         App.begin_export(app)
@@ -60,10 +61,12 @@ class SelectionTests(unittest.TestCase):
         # A pending job owns a snapshot even if UI state is subsequently reset.
         app.included_videos.clear()
         app.crops.clear()
+        app.overlap_only.get.return_value = False
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
             job()
         self.assertEqual(dispatch.call_args.kwargs['include_videos'], {'GX010002.mp4'})
         self.assertEqual(dispatch.call_args.kwargs['crops'], {'GX010002.mp4': 'top'})
+        self.assertTrue(dispatch.call_args.kwargs['overlap_only'])
         app.selected_video.assert_not_called()
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
