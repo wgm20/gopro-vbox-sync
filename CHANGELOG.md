@@ -1,5 +1,13 @@
 # Release notes
 
+## 1.5.0b3 — drag to frame your video
+
+- Replaces the fixed GUI crop positions with **Frame & preview…**: drag a crop box over the full source image while watching the finished output, including the selected overlay.
+- Retains the VBOX aspect ratio without stretching; supports vertical or horizontal positioning, arrow-key fine adjustment, centring, Apply and Cancel. Each video has its own framing.
+- Uses the same source-pixel rectangle in preview, export and reports. Resolution changes and resizing the editor retain the crop position. Command-line crop presets remain supported.
+- Defaults the desktop app to **Upright — no rotation** for every video, including videos not individually previewed. Manual rotation remains available.
+- Tests dragging, bounds, rotation, resizing, cancellation, missing references, exported pixels/gauges/audio, reruns and the packaged editor.
+
 ## 1.5.0b2 — export only matching periods
 
 - Adds **Only export video with VBOX data**, enabled by default. The app remembers the choice; untick it to retain full videos. The command-line equivalent is `--full-video`.

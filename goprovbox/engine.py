@@ -23,7 +23,7 @@ from . import __version__
 from .gpmf import TelemetryError
 from .media import Video, inspect_video, probe, utc_text, executable, run, preview, rotation_filter, CREATE_NO_WINDOW, percentile
 from .vbo import VBO, Row, read_vbo, write_vbo
-from .crop import MODES as CROP_MODES, Reference, rectangle, reference_for
+from .crop import Choice, Reference, rectangle, reference_for, validate_choice
 from .trimming import video_parts
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
@@ -387,13 +387,13 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
            max_size: int = 1920, encoder="auto", video_mode="convert", log=lambda msg: None,
            progress=lambda value: None, cancel: Event | None = None,
            telemetry_overlay: bool = False, overlay_scene: Path | None = None, overlay_mode="four",
-           include_videos: set[str] | None = None, crops: dict[str, str] | None = None,
+           include_videos: set[str] | None = None, crops: dict[str, Choice] | None = None,
            overlap_only: bool = True) -> Path:
     cancel = cancel or Event()
     rotations = rotations or {}
     crops = crops or {}
-    if any(mode not in CROP_MODES for mode in crops.values()):
-        raise TelemetryError("Unknown crop option")
+    for mode in crops.values():
+        validate_choice(mode)
     if set(crops) - {v.path.name for v in scan.videos}:
         raise TelemetryError("Crop option refers to an unknown GoPro file")
     telemetry_overlay = telemetry_overlay or overlay_scene is not None or overlay_mode == "full"
@@ -449,7 +449,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         if name in scan.crop_references and ref != scan.crop_references[name]:
             raise TelemetryError(f"{name}: original VBOX video changed since scan; scan again")
         crop_rectangles[name] = rectangle(video.width, video.height, selected[name], ref.aspect, mode)
-        crop_settings[name] = {"mode": mode, "rectangle": crop_rectangles[name].summary(), "reference": ref.summary()}
+        crop_settings[name] = {"mode": "custom" if isinstance(mode, dict) else mode,
+                               "rectangle": crop_rectangles[name].summary(), "reference": ref.summary()}
+        if isinstance(mode, dict):
+            crop_settings[name]["position"] = {key: mode[key] for key in ("x", "y")}
     if crop_settings:
         settings["crops"] = crop_settings
     renderers = {}
@@ -623,7 +626,7 @@ def write_report(report: dict, path: Path):
         crop = media.get("crop")
         if not crop:
             return "No crop"
-        mode = {"top": "cut off top", "bottom": "cut off bottom", "centre": "centre crop"}[crop["mode"]]
+        mode = {"top": "cut off top", "bottom": "cut off bottom", "centre": "centre crop", "custom": "custom crop"}[crop["mode"]]
         return "VBOX " + crop["reference"]["aspect"] + " · " + mode
     def range_description(media):
         span = media.get("range")

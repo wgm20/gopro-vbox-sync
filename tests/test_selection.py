@@ -67,6 +67,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(dispatch.call_args.kwargs['include_videos'], {'GX010002.mp4'})
         self.assertEqual(dispatch.call_args.kwargs['crops'], {'GX010002.mp4': 'top'})
         self.assertTrue(dispatch.call_args.kwargs['overlap_only'])
+        self.assertEqual(dispatch.call_args.kwargs['rotations'], {v.path.name: 0 for v in self.clips})
         app.selected_video.assert_not_called()
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')

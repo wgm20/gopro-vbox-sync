@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event, Thread
+from copy import deepcopy
 import json
 import os
 import queue
@@ -24,8 +25,6 @@ from .distribution import (asset, data_directory, tools_ready, download_tools, c
 ROTATIONS = {"Upright — no rotation": 0, "90° clockwise": 90, "180°": 180, "90° anticlockwise": 270}
 QUALITY = {"HD · 1920 px": 1920, "Full resolution": 0, "Compact · 1280 px": 1280}
 OVERLAYS = {"None": "none", "Driving data": "four", "Full scene · no rear camera": "full"}
-CROPS = {"No crop": "none", "VBOX shape · cut off top": "top", "VBOX shape · cut off bottom": "bottom",
-         "VBOX shape · centre crop": "centre"}
 
 
 
@@ -65,8 +64,7 @@ class App:
         self.quality.set(legacy.get(self.quality.get(), self.quality.get()))
         if self.quality.get() not in QUALITY:
             self.quality.set(next(iter(QUALITY)))
-        self.rotation = tk.StringVar()
-        self.crop_choice = tk.StringVar(value="No crop")
+        self.rotation = tk.StringVar(value=next(iter(ROTATIONS)))
         self.crop_note = tk.StringVar()
         self.overlap_only = tk.BooleanVar(value=prefs.get("overlap_only", True))
         self.overlay_mode = tk.StringVar(value=prefs.get("overlay_mode", "Driving data" if prefs.get("overlay_enabled") else "None"))
@@ -136,13 +134,8 @@ class App:
         rotationrow = ttk.Frame(right); rotationrow.pack(fill="x", pady=(8,0))
         self.rotate_combo = ttk.Combobox(rotationrow, textvariable=self.rotation, values=list(ROTATIONS), state="disabled", width=22)
         self.rotate_combo.pack(side="left",fill="x",expand=True); self.rotate_combo.bind("<<ComboboxSelected>>", self.change_rotation)
-        self.overlay_preview = ttk.Button(rotationrow, text="Preview output", command=self.preview_overlay, state="disabled")
+        self.overlay_preview = ttk.Button(rotationrow, text="Frame & preview…", command=self.preview_overlay, state="disabled")
         self.overlay_preview.pack(side="left",padx=(8,0))
-        croprow = ttk.Frame(right); croprow.pack(fill="x", pady=(8,0))
-        ttk.Label(croprow, text="Crop").pack(side="left", padx=(0,8))
-        self.crop_combo = ttk.Combobox(croprow, textvariable=self.crop_choice, values=list(CROPS), state="disabled", width=29)
-        self.crop_combo.pack(side="left", fill="x", expand=True)
-        self.crop_combo.bind("<<ComboboxSelected>>", self.change_crop)
         ttk.Label(right, textvariable=self.crop_note, wraplength=360).pack(anchor="w", pady=(4,0))
         options = ttk.Frame(main); options.pack(fill="x", pady=(16,10))
         ttk.Label(options, text="Resolution", width=9).pack(side="left")
@@ -274,7 +267,7 @@ class App:
         if not self.busy:
             self.scan = None; self.create.configure(state="disabled")
             self.included_videos.clear(); self.tree.delete(*self.tree.get_children()); self.summary.set("")
-            self.crops.clear(); self.crop_choice.set("No crop"); self.crop_note.set("")
+            self.crops.clear(); self.crop_note.set("")
             self.preview_generation += 1
             self.preview_label.configure(image="", text="Preview")
             self.set_busy(False)
@@ -353,31 +346,20 @@ class App:
         path = self.scene_path.get().strip() if mode != "none" else ""
         if mode == "full" and not path:
             messagebox.showerror("Choose a scene", "Choose a VBOX scene for the full overlay."); return
-        rotation = self.rotations.get(video.path.name, video.orientation.clockwise)
-        if rotation is None:
-            messagebox.showerror("Choose rotation", "Check the video orientation before previewing gauges."); return
+        rotation = self.rotations.get(video.path.name, 0)
         scan, size = self.scan, QUALITY[self.quality.get()]
-        crop = self.video_crop(video, rotation)
-        destination = Path(self.temporary.name) / "overlay-preview.png"
-        self.status.set("Reading scene artwork and preparing a preview…")
+        choice = deepcopy(self.crops.get(video.path.name, "none"))
+        ref = scan.crop_references.get(video.path.name)
+        destination = Path(self.temporary.name) / "framing-source.png"
+        self.status.set("Preparing the crop editor and output preview…")
         def work():
-            from PIL import Image
-            from .overlay import load_scene, Renderer
-            from .engine import dimensions
+            from .framing import prepare_preview
             matches = [m for m in scan.matches if m.video is video]
-            if not matches:
+            if not matches and mode != "none":
                 raise ValueError("This video has no matching VBOX data")
-            scene = load_scene(Path(path), mode=mode) if path else None
-            w, h = dimensions(video, rotation, size or 0, crop)
-            renderer = Renderer(video, matches, w, h, scene) if mode != "none" else None
-            seconds = video.clock.media_time((matches[0].rows[0].utc + matches[0].rows[-1].utc) / 2)
-            # Render at export size first, then reduce the finished preview.
-            preview(video.path, seconds, rotation, destination, crop=crop, output_size=(w, h))
-            im = Image.open(destination).convert("RGBA")
-            if renderer is not None: im.alpha_composite(renderer.frame(seconds), renderer.position)
-            im.thumbnail((1100, 800), Image.Resampling.LANCZOS); im.save(destination)
-            note = "Full scene · rear camera excluded" if mode == "full" else "Driving data" if mode == "four" else "Video only"
-            self.events.put(("overlay_preview", (destination, note)))
+            prepared = prepare_preview(video, matches, rotation, size, ref.aspect if ref else None,
+                                       mode, path, destination, self.cancel)
+            self.events.put(("framing_preview", (prepared, choice, scan)))
         self.worker(work)
 
     def choose_folder(self):
@@ -403,8 +385,6 @@ class App:
         self.scene_button.configure(state="normal" if enabled else "disabled")
         self.overlay_preview.configure(state="normal" if not busy and self.scan and self.scan.matches else "disabled")
         self.rotate_combo.configure(state="disabled" if busy or not self.scan else "readonly")
-        video = self.selected_video()
-        self.crop_combo.configure(state="readonly" if not busy and video and video.path.name in self.scan.crop_references else "disabled")
         self.create.configure(state="disabled" if busy or not self.scan or not self.included_videos else "normal")
         self.stop.configure(state="normal" if busy else "disabled")
         self.tree.configure(selectmode="none" if busy else "browse")
@@ -429,7 +409,7 @@ class App:
         if not self.folder.get() or not folder.is_dir():
             messagebox.showerror("Choose a folder", "Choose the folder with your VBOX runs and GoPro MP4 files."); return
         self.result = None; self.rotations = {}; self.crops = {}; self.progress["value"] = 0
-        self.crop_choice.set("No crop"); self.crop_note.set("")
+        self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
         self.preview_generation += 1; self.preview_label.configure(image="", text="Preview")
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
@@ -445,11 +425,8 @@ class App:
         video = self.selected_video()
         if video is None or self.busy:
             return
-        value = self.rotations.get(video.path.name, video.orientation.clockwise)
-        self.rotation.set(next((k for k, v in ROTATIONS.items() if v == value), "Choose rotation after reviewing"))
-        mode = self.crops.get(video.path.name, "none")
-        self.crop_choice.set(next(k for k, v in CROPS.items() if v == mode))
-        self.crop_combo.configure(state="readonly" if video.path.name in self.scan.crop_references else "disabled")
+        value = self.rotations.get(video.path.name, 0)
+        self.rotation.set(next(k for k, v in ROTATIONS.items() if v == value))
         if video.path.name in self.scan.crop_errors:
             self.log(self.scan.crop_errors[video.path.name])
         self.log(f"{video.path.name}: {video.orientation.evidence}")
@@ -461,13 +438,6 @@ class App:
             value = ROTATIONS[self.rotation.get()]
             self.rotations[video.path.name] = value
             self.load_preview(video, value)
-
-    def change_crop(self, *_):
-        video = self.selected_video()
-        if video and not self.busy:
-            self.crops[video.path.name] = CROPS[self.crop_choice.get()]
-            self.quality_changed()
-            self.load_preview(video, self.rotations.get(video.path.name, video.orientation.clockwise) or 0)
 
     def video_crop(self, video, rotation):
         mode = self.crops.get(video.path.name, "none")
@@ -489,10 +459,10 @@ class App:
         ref = self.scan.crop_references.get(video.path.name)
         from .engine import dimensions
         output_size = dimensions(video, rotation, QUALITY[self.quality.get()], crop)
-        note = f"VBOX {ref.label}" if ref else "VBOX crop needs the original VBOX video. See Details."
+        note = f"VBOX {ref.label} · no crop" if ref else "VBOX crop needs the original VBOX video. See Details."
         if crop:
             upright = (video.height, video.width) if rotation % 180 else (video.width, video.height)
-            note += " · sides trimmed equally" if crop.width < upright[0] - 1 else " · cropped preview"
+            note = f"VBOX {ref.label} · custom crop"
             if (crop.width, crop.height) == upright:
                 note = f"VBOX {ref.label} · already the same shape"
         self.crop_note.set(note)
@@ -516,8 +486,9 @@ class App:
         included = set(self.included_videos)
         if not included:
             messagebox.showerror("Choose videos", "Tick at least one video to include in processing."); return
-        rotations, size = dict(self.rotations), QUALITY[self.quality.get()]
-        crops = dict(self.crops)
+        rotations = {v.path.name: self.rotations.get(v.path.name, 0) for v in scan.videos}
+        size = QUALITY[self.quality.get()]
+        crops = deepcopy(self.crops)
         overlap_only = self.overlap_only.get()
         mode = OVERLAYS[self.overlay_mode.get()]
         overlay_enabled = mode != "none"
@@ -541,13 +512,16 @@ class App:
                 kind, value = self.events.get_nowait()
                 if kind == "log":
                     self.log(value)
-                elif kind == "overlay_preview":
-                    destination, note = value
-                    if not self.closing:
-                        window = tk.Toplevel(self.root); window.title("Output preview")
-                        window.image = tk.PhotoImage(file=str(destination))
-                        ttk.Label(window, image=window.image).pack()
-                        ttk.Label(window, text=note, padding=12, wraplength=1000).pack(fill="x")
+                elif kind == "framing_preview":
+                    prepared, choice, scan = value
+                    if not self.closing and not self.cancel.is_set() and self.scan is scan:
+                        from .framing import CropEditor
+                        def apply(choice, video=prepared.video, rotation=prepared.rotation):
+                            self.crops[video.path.name] = choice
+                            self.quality_changed()
+                            self.load_preview(video, rotation)
+                        CropEditor(self.root, prepared, choice, apply,
+                                   scan.crop_errors.get(prepared.video.path.name, ""))
                     self.status.set("Preview ready.")
                 elif kind == "progress":
                     self.progress["value"] = value * 100

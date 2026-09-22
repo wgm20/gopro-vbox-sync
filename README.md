@@ -14,8 +14,8 @@ Use the download page's **Download for Windows** button. No Python installation,
 
 1. Install and open GoPro VBOX Sync. The app offers a verified download of FFmpeg video tools if needed (110 MB; allow 500 MB free space). Processing works offline after setup.
 2. Put the GoPro MP4 files in the folder with your VBOX runs. Choose that folder and click **Scan**. Subfolders are ignored.
-3. Tick the videos to **Include**. Click each row to inspect its preview and check rotation. Use **Crop** below the preview to match the original VBOX video’s shape: cut off top, cut off bottom, or centre crop. Keep the original VBOX MP4/AVI files beside the VBO files. Each video has its own choice.
-4. Choose resolution and overlay, then **Preview output** and **Create files**. **Only export video with VBOX data** starts ticked; untick it to keep full videos. The app remembers your choice.
+3. Tick the videos to **Include**. Click each row to inspect its preview. Rotation defaults to **Upright — no rotation**; change it when needed. Keep the original VBOX MP4/AVI files beside the VBO files to enable cropping.
+4. Choose resolution and overlay, then open **Frame & preview…**. Tick **Crop to VBOX**, drag the crop box on the left and check the finished picture on the right. Arrow keys allow fine adjustments. Click **Apply**, then **Create files**. Each video has its own framing. **Only export video with VBOX data** starts ticked; untick it to keep full videos. The app remembers that choice.
 5. Read the **Report**. Keep the generated MP4 and VBO files together. The MP4 also plays in ordinary video players.
 
 **Start with Help → Try practice recordings.** Two short synthetic movies and matching data are included. Try unticking one run and exporting the other. The illustrated **Help → Quick-start guide** works offline and covers setup, overlays, troubleshooting and privacy.
@@ -24,8 +24,8 @@ Use the download page's **Download for Windows** button. No Python installation,
 
 - Matches by GoPro GPS timestamps, checks concurrent position and speed, and handles partial overlaps, gaps, midnight and consecutive camera chapters.
 - Exports only matching periods by default, with separate clips for gaps and adjusted VBOX playback times. Sound, overlays and GPS clock drift stay aligned. The frames containing the boundary samples are retained; full-session lap history remains available. Untick **Only export video with VBOX data**, or pass `--full-video`, to keep full videos.
-- Suggests upright rotation from camera metadata and gives you a preview to check.
-- Crops each GoPro to the linked VBOX video’s display aspect ratio, with top, bottom and centre choices. Rotation is applied first and overlays are fitted afterwards. Missing or conflicting original VBOX videos disable cropping for that recording; No crop remains available. Wider inputs trim both sides equally.
+- Defaults the desktop app to no rotation and gives you a preview to check. Manual rotation is available; detected orientation remains in scan details.
+- Lets you drag a crop over the full source image while previewing the finished picture and gauges. Cropping retains the linked VBOX video’s display aspect ratio, normally 16:9. Rotation is applied first and overlays are fitted afterwards. Missing or conflicting original VBOX videos disable cropping for that recording; uncropped output remains available. The command line retains its top, bottom and centre presets.
 - Exports only the videos you tick and links only overlapping VBOX samples.
 - Adds speed, RPM, throttle and brake with a built-in dashboard or a supported scene.
 - Renders a supported full scene, excluding the rear camera, with proportional gauges and an undistorted track map.

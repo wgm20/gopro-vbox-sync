@@ -4,11 +4,23 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 from pathlib import Path
+import math
 
 from .gpmf import TelemetryError
 from .media import probe
 
 MODES = ("none", "top", "bottom", "centre")
+Choice = str | dict[str, float | str]
+
+
+def validate_choice(choice: Choice):
+    if isinstance(choice, str) and choice in MODES:
+        return
+    if isinstance(choice, dict) and set(choice) == {"mode", "x", "y"} and choice["mode"] == "custom":
+        if all(isinstance(choice[k], (int, float)) and not isinstance(choice[k], bool)
+               and math.isfinite(choice[k]) and 0 <= choice[k] <= 1 for k in ("x", "y")):
+            return
+    raise TelemetryError("Invalid crop position; choose a position inside the video")
 
 
 @dataclass(frozen=True)
@@ -38,10 +50,9 @@ class Reference:
         return {"aspect": self.label, "sources": self.sources}
 
 
-def rectangle(width: int, height: int, rotation: int, aspect: Fraction, mode: str) -> Crop | None:
+def rectangle(width: int, height: int, rotation: int, aspect: Fraction, mode: Choice) -> Crop | None:
     """Coordinates are in the upright frame. Even boundaries preserve 4:2:0 chroma."""
-    if mode not in MODES:
-        raise TelemetryError("Unknown crop option")
+    validate_choice(mode)
     if mode == "none":
         return None
     if rotation not in (0, 90, 180, 270) or aspect <= 0 or min(width, height) < 2:
@@ -57,7 +68,24 @@ def rectangle(width: int, height: int, rotation: int, aspect: Fraction, mode: st
     # A wider source needs a centred side crop; vertical placement then has no effect.
     x = (w - cw) // 4 * 2
     y = ((h - ch) // 2 * 2 if mode == "top" else 0 if mode == "bottom" else (h - ch) // 4 * 2)
+    if isinstance(mode, dict):
+        # Fractions of the available travel keep framing independent of preview
+        # size, output resolution and window size. Snap only at source pixels.
+        x = round(mode["x"] * ((w - cw) // 2)) * 2
+        y = round(mode["y"] * ((h - ch) // 2)) * 2
     return Crop(cw, ch, x, y)
+
+
+def positioned(width: int, height: int, rotation: int, aspect: Fraction, x: float, y: float) -> dict:
+    """Clamp a dragged top-left corner (upright source pixels) to a valid choice."""
+    crop = rectangle(width, height, rotation, aspect, "centre")
+    w, h = (height, width) if rotation % 180 else (width, height)
+    def fraction(value, travel):
+        if not math.isfinite(value):
+            raise TelemetryError("Invalid crop position")
+        return min(1., max(0., value / travel)) if travel else .5
+    return {"mode": "custom", "x": fraction(x, (w - crop.width) // 2 * 2),
+            "y": fraction(y, (h - crop.height) // 2 * 2)}
 
 
 def display_aspect(metadata: dict) -> Fraction:

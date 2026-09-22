@@ -10,7 +10,7 @@ import shutil
 import unittest
 
 from PIL import Image, ImageChops, ImageStat
-from goprovbox.crop import Crop, rectangle, display_aspect, original_paths, reference_for
+from goprovbox.crop import Crop, rectangle, display_aspect, original_paths, reference_for, positioned, validate_choice
 from goprovbox.engine import Scan, dimensions, encode, export, fingerprint, intersections, scan_folder
 from goprovbox.gpmf import TelemetryError
 from goprovbox.media import executable, preview, probe, run
@@ -52,6 +52,30 @@ class CropGeometryTests(unittest.TestCase):
         meta['streams'][1]['sample_aspect_ratio'] = '0:1'
         self.assertEqual(display_aspect(meta), Fraction(4, 5))
         with self.assertRaises(TelemetryError): display_aspect({'streams': []})
+
+    def test_custom_position_clamps_to_frame_and_roundtrips_source_pixels(self):
+        for rotation in (0, 90, 180, 270):
+            for width, height in ((1600, 1600), (1080, 1920), (5313, 3101)):
+                for x, y in ((-100, -100), (121, 238), (99999, 99999)):
+                    choice = positioned(width, height, rotation, Fraction(16, 9), x, y)
+                    crop = rectangle(width, height, rotation, Fraction(16, 9), choice)
+                    w, h = (height, width) if rotation % 180 else (width, height)
+                    self.assertGreaterEqual(crop.x, 0); self.assertGreaterEqual(crop.y, 0)
+                    self.assertLessEqual(crop.x + crop.width, w); self.assertLessEqual(crop.y + crop.height, h)
+                    self.assertTrue(all(n % 2 == 0 for n in (crop.x, crop.y, crop.width, crop.height)))
+                    again = positioned(width, height, rotation, Fraction(16, 9), crop.x, crop.y)
+                    self.assertEqual(rectangle(width, height, rotation, Fraction(16, 9), again), crop)
+        self.assertEqual(rectangle(1600, 1600, 0, Fraction(16, 9),
+                                  positioned(1600, 1600, 0, Fraction(16, 9), 0, 238)), Crop(1600, 900, 0, 238))
+        self.assertEqual(rectangle(1920, 1080, 0, Fraction(1),
+                                  positioned(1920, 1080, 0, Fraction(1), 120, 0)), Crop(1080, 1080, 120, 0))
+
+    def test_reject_invalid_or_nonfinite_custom_coordinates(self):
+        for value in (None, [], 'custom', {'mode': 'custom'}, {'mode': 'centre', 'x': .5, 'y': .5}):
+            with self.subTest(value=value), self.assertRaises(TelemetryError): validate_choice(value)
+        for x in (True, '0.5', -.01, 1.01, float('nan'), float('inf')):
+            with self.subTest(x=x), self.assertRaises(TelemetryError):
+                validate_choice({'mode': 'custom', 'x': x, 'y': .5})
 
 
 class CropReferenceTests(unittest.TestCase):
@@ -174,6 +198,35 @@ class CropEncodingTests(unittest.TestCase):
                 export(self.scan, self.folder / 'out', crops={self.source.name: 'centre'})
             mocked.assert_not_called()
         self.assertFalse((self.folder / 'out').exists())
+
+    def test_custom_editor_output_matches_encoded_crop_gauges_sound_and_rerun(self):
+        from goprovbox.framing import prepare_preview
+        from goprovbox.vbo import write_vbo, read_vbo
+        self.vbo = four_channel_vbo(self.folder)
+        write_vbo(self.vbo, self.vbo.rows, list(range(len(self.vbo.rows))), 'VBOX0001_', self.vbo.path)
+        self.vbo = read_vbo(self.vbo.path)
+        self.matches = intersections(self.vbo, self.clip)
+        self.scan.vbos = [self.vbo]; self.scan.matches = self.matches
+        self.scan.fingerprints = {p.name: fingerprint(p) for p in (self.source, self.vbo.path)}
+        choice = positioned(160, 160, 0, Fraction(2), 0, 22)
+        prepared = prepare_preview(self.clip, self.matches, 0, 160, Fraction(2), 'four', '',
+                                   self.folder / 'source.png', Event())
+        shown = prepared.output(choice, (160, 80))
+        result = export(self.scan, self.folder / 'custom', crops={self.source.name: choice},
+                        rotations={self.source.name: 0}, encoder='software', telemetry_overlay=True)
+        report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+        media = report['media'][0]; movie = result / media['file']
+        self.assertEqual(report['settings']['crops'][self.source.name]['rectangle'],
+                         {'width': 160, 'height': 80, 'x': 0, 'y': 22})
+        self.assertTrue(report['outputs'][0]['telemetry_preserved'])
+        self.assertTrue(any(s['codec_type'] == 'audio' for s in probe(movie)['streams']))
+        preview(movie, prepared.seconds, 0, self.folder / 'exported.png', output_size=(160, 80))
+        with Image.open(self.folder / 'exported.png') as encoded:
+            self.assertLess(max(ImageStat.Stat(ImageChops.difference(shown.convert('RGB'), encoded.convert('RGB'))).mean), 10)
+        self.assertEqual(export(self.scan, result, crops={self.source.name: choice},
+                                rotations={self.source.name: 0}, encoder='software', telemetry_overlay=True), result)
+        with self.assertRaisesRegex(TelemetryError, 'already exists'):
+            export(self.scan, result, crops={self.source.name: dict(choice, y=.6)}, encoder='software', telemetry_overlay=True)
 
 
 if __name__ == '__main__':
