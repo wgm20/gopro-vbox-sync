@@ -98,6 +98,19 @@ class FullSceneTests(unittest.TestCase):
         origin=transform.point((0,0));a=transform.point(east);b=transform.point(north)
         self.assertAlmostEqual(math.dist(origin,a),math.dist(origin,b),places=6)
 
+    def test_track_is_gold_without_dark_border_and_keeps_scene_marker(self):
+        # A track-only scene isolates map pixels from white text and gauge artwork.
+        self.scene.elements=[e for e in self.scene.elements if e['kind']=='map']
+        for size in ((1920,1080),(1920,1920),(1080,1920),(640,360)):
+            with self.subTest(size=size):
+                renderer=Renderer(self.clip,[self.match],*size,self.scene)
+                frame=renderer.frame(30)
+                colours={colour for count,colour in frame.getcolors(frame.width*frame.height) if colour[3]}
+                self.assertIn((255,170,0,255),colours)
+                self.assertIn((255,0,0,255),colours)
+                self.assertFalse(any(r==240 and g==249 and b==255 for r,g,b,a in colours))
+                self.assertFalse(any(r<30 and g<30 and b<40 for r,g,b,a in colours))
+
     def test_widgets_fit_landscape_square_portrait_without_stretching(self):
         for size in ((1920,1080),(1920,1920),(1080,1920),(640,360)):
             elements,scale=fit_layout(self.scene.elements,self.scene.size,*size)
@@ -146,6 +159,9 @@ class FullSceneTests(unittest.TestCase):
     def test_full_scene_export_preserves_data_audio_and_coverage(self):
         from goprovbox.vbo import write_vbo,read_vbo
         vbo=four_channel_vbo(self.folder)
+        for row,position in zip(vbo.rows,self.vbo.rows):
+            for column in ('lat','long'):
+                row.values[vbo.index(column)]=position.values[self.vbo.index(column)]
         write_vbo(vbo,vbo.rows,list(range(len(vbo.rows))),'test_',vbo.path)
         vbo=read_vbo(vbo.path)
         clip=replace(self.clip,duration=3)
@@ -167,6 +183,10 @@ class FullSceneTests(unittest.TestCase):
             pixels=run([executable('ffmpeg'),'-v','error','-ss',str(time),'-i',str(movie),'-frames:v','1',
                         '-f','rawvideo','-pix_fmt','rgb24','pipe:1'])
             self.assertEqual(max(pixels)>100,present)
+            if present:
+                # Check the actual encoded/decoded video, allowing H.264 colour loss.
+                gold=sum(r>210 and 125<g<205 and b<55 for r,g,b in zip(pixels[0::3],pixels[1::3],pixels[2::3]))
+                self.assertGreater(gold,20)
 
 
 if __name__=='__main__':unittest.main()

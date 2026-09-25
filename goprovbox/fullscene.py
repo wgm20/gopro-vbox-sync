@@ -165,8 +165,9 @@ class FullSceneRenderer(FourChannelRenderer):
                 transform=MapTransform(session.map_points,e["size"],max(6,round(20*self.scale)))
                 im=Image.new("RGBA",e["size"]);d=ImageDraw.Draw(im);points=[transform.point(p) for p in session.map_points]
                 if len(points)>1:
-                    d.line(points,fill=(5,20,30,210),width=max(4,round(10*self.scale)),joint="curve")
-                    d.line(points,fill=(240,249,255,255),width=max(2,round(4*self.scale)),joint="curve")
+                    # Database maps use the recorder's gold line, not the blue
+                    # placeholder artwork or the separate position-marker colour.
+                    d.line(points,fill=(255,170,0,255),width=max(2,round(4*self.scale)),joint="curve")
                 self.map_cache[(session.vbo.path,e["name"])]=(im,transform)
 
     def source_value(self, source, session, utc, row, lap):

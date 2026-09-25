@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b2 — match the VBOX track-map colour
+
+- Draws the GPS track outline in yellow/gold, matching the original VBOX recording, and removes the added dark border. The scene's position marker is retained.
+- Uses the corrected styling in previews and new full-scene exports; existing videos need to be exported again. Telemetry, map proportions and synchronisation are unchanged.
+- Checks rendered map and marker colours at landscape, square and portrait sizes, plus the map colour in an encoded video.
+
 ## 1.6.0b1 — aligned VBOX sound by default
 
 - Uses sound from the original VBOX videos by default. Keep them beside the VBO files. The new **Sound** choice remembers VBOX or GoPro.
