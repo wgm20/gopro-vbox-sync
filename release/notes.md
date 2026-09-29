@@ -1,8 +1,8 @@
 Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry.
 
-**Updated in 1.6.0b2:** Full-scene previews and exports now use a yellow/gold track outline to match the original VBOX recording, without the added dark border. Your scene's position marker is retained. Export your video again to apply the new appearance. Map proportions, telemetry and synchronisation are unchanged. Includes aligned VBOX sound by default and the earlier scene rounding and FFmpeg 7 fixes.
+**Updated in 1.6.0b3:** Fixes the missing temporary audio file error when exporting from deeply nested recording folders on Windows. Shorter working-folder and diagnostic filenames keep audio preparation and video export within Windows path limits. Includes a regression check in both the source tests and installed app. Audio alignment, telemetry and original recordings are unchanged. Includes the yellow/gold scene track map and aligned VBOX sound by default.
 
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b2-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b3-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB). An illustrated guide is included offline.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. The issue remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved.
 

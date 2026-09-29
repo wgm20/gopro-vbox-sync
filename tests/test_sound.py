@@ -93,6 +93,35 @@ class SoundTests(unittest.TestCase):
         # ffmpeg -ss after -i is relative to format start (5 seconds).
         self.assertGreater(correlation(samples(original, 4.4, .4), samples(wav, .4, .4)), .999)
 
+    def test_long_output_folder_keeps_audio_and_video_work_paths_short(self):
+        original = self.folder/'VBOX0001_0001.mp4'
+        self.recording(original, 12, 'sin(2*PI*(200*t+20*t*t))')
+        scan = self.scan(self.vbo(2017, 4117))
+        # Match the reported Windows failure: the final output paths fit, but
+        # repeating the output folder's name in staging pushed audio past 260.
+        parent = self.folder/'Race day recordings'
+        parent /= 'x' * max(1, 182 - len(str(parent)) - 1)
+        output = parent/'GoPro Circuit Tools Overlay Cropped Matched'
+        old_audio = parent/('.'+output.name+'.working-12345678')/'GoPro_GX010001_0001.audio.wav'
+        self.assertGreaterEqual(len(str(old_audio)), 260)
+        self.assertLess(len(str(output/'GoPro_GX010001_0001.mp4')), 260)
+        result = export(scan, output, encoder='software',
+                        crops={self.clip.path.name: {'mode':'custom', 'x':.5, 'y':.75}})
+        report = json.loads((result/'report.json').read_text())
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(report['media'][0]['audio']['source'], 'vbox_preferred')
+        self.assertTrue(report['outputs'][0]['telemetry_preserved'])
+        movie = result/report['media'][0]['file']
+        self.assertGreater(correlation(samples(original, 4.4, .3), samples(movie, .4, .3)), .98)
+        self.assertFalse(list(result.glob('*.wav')))
+        for path in result.iterdir():
+            self.assertLess(len(str(path)), 260, path.name)
+            self.assertTrue(path.is_file(), path.name)
+            with path.open('rb') as handle:
+                handle.read(1)
+        self.assertEqual(export(scan, output, encoder='software',
+                                crops={self.clip.path.name: {'mode':'custom', 'x':.5, 'y':.75}}), result)
+
     def test_full_video_falls_back_for_gaps_and_missing_vbox_chapter(self):
         original = self.folder/'VBOX0001_0001.mp4'
         self.recording(original, 8, 'sin(2*PI*500*t)')

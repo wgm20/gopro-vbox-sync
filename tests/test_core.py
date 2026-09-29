@@ -364,8 +364,9 @@ class VBOTests(unittest.TestCase):
             with self.assertRaises(TelemetryError):
                 export(scan,self.folder / "output",audio_source="gopro")
         self.assertFalse((self.folder / "output").exists())
-        reports = list(self.folder.glob(".output.working-*/report.json"))
+        reports = list(self.folder.glob(".gvs-*/report.json"))
         self.assertEqual(json.loads(reports[0].read_text())["status"],"failed")
+        self.assertEqual(json.loads(reports[0].read_text())["output_folder"], str(self.folder / "output"))
 
     def test_cancel_before_encoding_never_publishes(self):
         vbo = fixture(self.folder / "data.vbo")

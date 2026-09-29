@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b3 — export from long recording-folder paths
+
+- Fixes the missing temporary audio-file error when exporting from a deeply nested recording folder. Shorter temporary folder and diagnostic log names leave room for aligned sound and video files within Windows path limits.
+- Keeps temporary work on the destination drive and publishes the completed folder only after validation. Failed-export reports identify the intended output folder.
+- Adds a regression that reproduces the previous failure, checks cropped exports with VBOX sound, and exercises the same long-path case in the installed app. Sound synchronisation, video and VBO filenames, and original recordings are unchanged.
+
 ## 1.6.0b2 — match the VBOX track-map colour
 
 - Draws the GPS track outline in yellow/gold, matching the original VBOX recording, and removes the added dark border. The scene's position marker is retained.

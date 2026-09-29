@@ -530,10 +530,13 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
     estimate = duration_total * 8_000_000 + 512 * 1024 * 1024
     if shutil.disk_usage(output.parent).free < estimate:
         raise TelemetryError(f"Allow about {estimate / 1024**3:.1f} GB free for video preparation.")
-    staging = output.parent / ("." + output.name + ".working-" + uuid.uuid4().hex[:8])
+    # Keep intermediates beside the destination for an atomic final rename,
+    # without repeating its long name. The old suffix could put a temporary
+    # WAV/mux path over Windows MAX_PATH even when every final file fitted.
+    staging = output.parent / (".gvs-" + uuid.uuid4().hex[:8])
     staging.mkdir()
     report = scan.summary() | {"signature": signature, "settings": settings, "status": "working", "outputs": [], "media": [],
-                              "excluded_videos": excluded_videos,
+                              "excluded_videos": excluded_videos, "output_folder": str(output),
                               "compatibility_notes": [CT_COMPATIBILITY_NOTE]}
     names = set()
     try:

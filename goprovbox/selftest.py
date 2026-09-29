@@ -32,8 +32,19 @@ def run_self_test(destination: Path):
     assert [len(m.rows) for m in scan.matches] == [100, 101]
     chosen = scan.videos[0].path.name
     custom = {"mode": "custom", "x": .5, "y": .75}
-    result = export(scan, destination / "Export", include_videos={chosen},
+    # Exercise the packaged app at the reported long-path boundary, including
+    # WAV preparation, muxing, logs, previews and the final folder rename.
+    output_parent = destination / "Race day recordings"
+    output_parent /= "x" * max(1, 182 - len(str(output_parent)) - 1)
+    output = output_parent / "GoPro Circuit Tools Overlay Cropped Matched"
+    legacy_audio = output_parent / ("." + output.name + ".working-12345678") / "GoPro_GX01D001_0001.audio.wav"
+    assert len(str(legacy_audio)) >= 260
+    result = export(scan, output, include_videos={chosen},
                     encoder="software", telemetry_overlay=True, crops={chosen: custom})
+    for path in result.iterdir():
+        assert len(str(path)) < 260, path.name
+        with path.open("rb") as handle:
+            handle.read(1)
     videos = list(result.glob("*.mp4"))
     assert len(videos) == 1
     assert len(list(result.glob("*.vbo"))) == 1
@@ -78,10 +89,10 @@ def run_self_test(destination: Path):
     assert asset("quick-start.html").is_file()
     report = {"version": __version__, "frozen": bool(getattr(sys, "frozen", False)),
               "uninstaller_available": uninstall_command() is not None,
-              "passed": True, "matched_videos": 2, "exported_videos": 1,
+              "passed": True, "matched_videos": 2, "exported_videos": 1, "export_folder": str(result),
               "checks": ["Tk and packaged icon", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor", "four-channel overlay", "encoded video and VBO verification",
-                         "VBOX sound and decoded alignment at both ends", "offline help"],
+                         "VBOX sound and decoded alignment at both ends", "long output folder with short temporary paths", "offline help"],
               "limits": "Does not test Circuit Tools acceptance or a fresh Windows machine."}
     (destination / "self-test.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report

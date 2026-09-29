@@ -317,7 +317,9 @@ def render_audio(plan, destination, cancel, progress=lambda _: None):
                     received += len(block)
                     if received > expected: raise TelemetryError("Prepared sound exceeds its planned duration")
                     wav.writeframesraw(block)
-                _process(args, destination.with_suffix(".audio.log"), cancel, consume)
+                # The WAV already has an .audio stem. Keep retained log names
+                # short enough to fit beside the final video on Windows.
+                _process(args, destination.with_suffix(".log"), cancel, consume)
                 if received != expected: raise TelemetryError("Prepared sound is incomplete")
             written += span.samples; progress(written/plan.samples)
     if written != plan.samples: raise TelemetryError("Prepared sound has gaps or overlapping segments")
@@ -333,7 +335,7 @@ def attach_audio(video_path, sound_path, duration, cancel):
     args = [executable("ffmpeg"), "-v", "error", "-nostdin", "-n", "-i", str(video_path), "-i", str(sound_path),
             "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
             "-t", f"{duration:.9f}", "-map_metadata", "0", "-movflags", "+faststart", str(target)]
-    _process(args, video_path.with_suffix(".audio-mux.log"), cancel)
+    _process(args, video_path.with_suffix(".mux.log"), cancel)
     meta = probe(target)
     audio = next((s for s in meta["streams"] if s["codec_type"] == "audio"), None)
     if (audio is None or abs(float(audio.get("start_time", 0))) > 1/RATE

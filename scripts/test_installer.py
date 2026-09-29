@@ -40,7 +40,7 @@ def main():
     result = subprocess.run([str(target / "unins000.exe"), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"], timeout=120)
     assert result.returncode == 0
     assert not (target / "GoProVBOXSync.exe").exists()
-    assert (evidence / "self test/Export/Report.html").is_file()
+    assert (Path(report["export_folder"]) / "Report.html").is_file()
     report["installer"] = "passed"; report["uninstaller"] = "passed, exports retained"
     (root / "release-output/validation.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"Installer, isolated runtime and uninstall passed. Evidence: {evidence}")
