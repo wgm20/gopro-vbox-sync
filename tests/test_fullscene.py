@@ -6,6 +6,8 @@ import math
 import json
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 import xml.etree.ElementTree as ET
 
 from goprovbox.lapdata import Session,Projection
@@ -51,7 +53,7 @@ def circle_vbo(folder):
     return vbo
 
 
-class FullSceneTests(unittest.TestCase):
+class FullSceneTests(ExportTestCase):
     def setUp(self):
         temp=TemporaryDirectory();self.addCleanup(temp.cleanup);self.folder=Path(temp.name)
         self.vbo=circle_vbo(self.folder);self.scene=complete_scene()
@@ -172,7 +174,7 @@ class FullSceneTests(unittest.TestCase):
         with patch('goprovbox.overlay.load_scene',return_value=self.scene) as load:
             result=export(scan,self.folder/'out',overlay_scene=self.folder/'scene.vvhsn',overlay_mode='full',encoder='software',overlap_only=False)
             load.assert_called_once_with(self.folder/'scene.vvhsn',mode='full')
-        report=json.loads((result/'report.json').read_text())
+        report=json.loads(export_report_path(result, "report.json").read_text())
         self.assertEqual(report['settings']['overlay']['mode'],'full')
         self.assertTrue(report['settings']['overlay']['notes'])
         self.assertTrue(report['outputs'][0]['telemetry_preserved'])

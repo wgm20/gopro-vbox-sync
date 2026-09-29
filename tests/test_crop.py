@@ -8,6 +8,8 @@ from unittest.mock import patch
 import json
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from PIL import Image, ImageChops, ImageStat
 from goprovbox.crop import Crop, rectangle, display_aspect, original_paths, reference_for, positioned, validate_choice
@@ -19,7 +21,7 @@ from tests.test_core import fixture, video
 from tests.test_overlay import four_channel_vbo, scene_members
 
 
-class CropGeometryTests(unittest.TestCase):
+class CropGeometryTests(ExportTestCase):
     def test_remove_top_bottom_and_centre_have_unambiguous_meanings(self):
         for mode, y in [('top', 700), ('bottom', 0), ('centre', 350)]:
             with self.subTest(mode=mode):
@@ -78,7 +80,7 @@ class CropGeometryTests(unittest.TestCase):
                 validate_choice({'mode': 'custom', 'x': x, 'y': .5})
 
 
-class CropReferenceTests(unittest.TestCase):
+class CropReferenceTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
@@ -124,7 +126,7 @@ class CropReferenceTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
-class CropEncodingTests(unittest.TestCase):
+class CropEncodingTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
@@ -147,7 +149,7 @@ class CropEncodingTests(unittest.TestCase):
         for mode, colours in expected.items():
             with self.subTest(mode=mode):
                 result = export(self.scan, self.folder / mode, crops={self.source.name: mode}, encoder='software')
-                report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+                report = json.loads(export_report_path(result, "report.json").read_text(encoding='utf-8'))
                 media = report['media'][0]; movie = result / media['file']
                 self.assertEqual(media['verification']['dimensions'], [160, 80])
                 self.assertEqual(media['verification']['frames'], '90')
@@ -214,7 +216,7 @@ class CropEncodingTests(unittest.TestCase):
         shown = prepared.output(choice, (160, 80))
         result = export(self.scan, self.folder / 'custom', crops={self.source.name: choice},
                         rotations={self.source.name: 0}, encoder='software', telemetry_overlay=True)
-        report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+        report = json.loads(export_report_path(result, "report.json").read_text(encoding='utf-8'))
         media = report['media'][0]; movie = result / media['file']
         self.assertEqual(report['settings']['crops'][self.source.name]['rectangle'],
                          {'width': 160, 'height': 80, 'x': 0, 'y': 22})

@@ -9,6 +9,8 @@ import json
 import math
 import struct
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from goprovbox.gpmf import TelemetryError, Record, records, streams, scaled
 from goprovbox.media import Clock, GPSPoint, Video, Orientation, fit_clock, detect_orientation, inspect_video
@@ -87,7 +89,7 @@ def video(path, start=BASE, duration=10, rotation=0):
                  Orientation(rotation, 1, "test"), gps)
 
 
-class GPMFTests(unittest.TestCase):
+class GPMFTests(ExportTestCase):
     def test_nested_big_endian_and_padding(self):
         payload = container("DEVC", [container("STRM", [klv("STNM", "c", 1, b"GPS"), klv("SCAL", "l", 4, struct.pack(">i", 100))])])
         data = list(streams(payload))[0]
@@ -134,7 +136,7 @@ class GPMFTests(unittest.TestCase):
                 records(data)
 
 
-class ClockTests(unittest.TestCase):
+class ClockTests(ExportTestCase):
     def test_legacy_gps5_fallback_and_quality_filter(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / "GH010001.mp4"
@@ -205,7 +207,7 @@ class ClockTests(unittest.TestCase):
             self.assertAlmostEqual(result.clock.first_fix, 5.25)
 
 
-class OrientationTests(unittest.TestCase):
+class OrientationTests(ExportTestCase):
     def test_all_four_orientations(self):
         for vector, expected in [((0,-1,0),0), ((1,0,0),90), ((0,1,0),180), ((-1,0,0),270)]:
             with self.subTest(expected=expected):
@@ -229,7 +231,7 @@ class OrientationTests(unittest.TestCase):
         self.assertIsNone(detect_orientation([], [], 45).clockwise)
 
 
-class VBOTests(unittest.TestCase):
+class VBOTests(ExportTestCase):
     def setUp(self):
         self.temp = TemporaryDirectory(); self.folder = Path(self.temp.name)
     def tearDown(self):

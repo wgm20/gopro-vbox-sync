@@ -26,6 +26,7 @@ from .vbo import VBO, Row, read_vbo, write_vbo
 from .crop import Choice, Reference, rectangle, reference_for, validate_choice
 from .trimming import video_parts
 from .sound import plan_audio, render_audio, attach_audio
+from .reports import archive_details, export_report_path
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
                          "Video playback, rotation and seeking were successful, but this intermittent VBO rejection remains unresolved.")
@@ -512,16 +513,19 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         if fingerprint(scan.folder / name) != info:
             raise TelemetryError(f"Source changed since scan: {name}; scan again")
     if output.exists():
-        reportfile = output / "report.json"
+        intact = False
         try:
+            reportfile = export_report_path(output, "report.json")
             previous = json.loads(reportfile.read_text(encoding="utf-8"))
             if previous.get("signature") == signature and previous.get("status") == "complete":
                 intact = all(fingerprint(output / name) == value for name, value in previous["output_fingerprints"].items())
-                if intact:
-                    log("This folder has already been exported and verified. Reusing the existing result.")
-                    progress(1); return output
         except (OSError, ValueError, KeyError):
             pass
+        if intact:
+            if reportfile.parent == output:
+                archive_details(output, output, previous, write_report)
+            log("This folder has already been exported and verified. Reusing the existing result.")
+            progress(1); return output
         raise TelemetryError(f"Output folder already exists with different settings or changed files: {output}. "
                              "Choose a new output folder; existing results are never overwritten.")
     groups = recording_groups(used)
@@ -539,6 +543,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                               "excluded_videos": excluded_videos, "output_folder": str(output),
                               "compatibility_notes": [CT_COMPATIBILITY_NOTE]}
     names = set()
+    record = None
     try:
         duration_done = 0
         for group in groups:
@@ -643,14 +648,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     raise TelemetryError(f"Original VBOX video changed during export: {name}")
         report["status"] = "complete"
         report["output_fingerprints"] = {p.name: fingerprint(p) for p in staging.iterdir() if p.suffix in (".vbo", ".mp4")}
-        (staging / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-        write_report(report, staging / "Report.html")
-        (staging / "OPEN IN CIRCUIT TOOLS.txt").write_text(
-            "Open the GoPro_*.vbo files in Circuit Tools 3. Keep generated MP4 files beside them.\n"
-            "Original telemetry channels and lap markers are retained. Only overlapping telemetry is exported.\n" +
-            ("Video contains only matched periods; VBOX video times start in each trimmed clip.\n" if overlap_only else
-             "Video covers the full GoPro chapter; VBOX video times seek into the matching portion.\n") +
-            "See Report.html for matches, orientation, skipped files and validation.\n", encoding="utf-8")
+        record = archive_details(staging, output, report, write_report)
         if cancel.is_set():
             raise InterruptedError("Cancelled")
         staging.rename(output)
@@ -660,6 +658,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         report["status"] = "cancelled" if isinstance(exc, (InterruptedError, KeyboardInterrupt)) else "failed"
         report["failure"] = str(exc)
         (staging / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        if record is not None:
+            (record / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         log(f"Incomplete work and diagnostic logs saved in {staging}")
         raise
 
@@ -680,6 +680,24 @@ def verify_vbo(path: Path, source: VBO, rows: list[Row], times: list[float], ind
             raise TelemetryError("Invalid exported video reference")
 
 
+def tidy_export(output: Path) -> Path:
+    """Migrate a verified legacy export without altering its video or data."""
+    output = output.resolve()
+    reportfile = export_report_path(output, "report.json")
+    if reportfile.parent != output:
+        return reportfile.parent
+    report = json.loads(reportfile.read_text(encoding="utf-8"))
+    fingerprints = report.get("output_fingerprints", {})
+    if not fingerprints:
+        raise TelemetryError("Cannot tidy an export without its verification record")
+    for name, expected in fingerprints.items():
+        if Path(name).name != name or "/" in name or "\\" in name or Path(name).suffix.lower() not in (".mp4", ".vbo"):
+            raise TelemetryError("Invalid exported media filename")
+        if fingerprint(output / name) != expected:
+            raise TelemetryError(f"Export has changed: {name}; supporting files have been kept")
+    return archive_details(output, output, report, write_report)
+
+
 def write_report(report: dict, path: Path):
     e = html.escape
     def crop_description(media):
@@ -695,7 +713,9 @@ def write_report(report: dict, path: Path):
         def stamp(seconds):
             return f"{int(seconds // 60):02d}:{seconds % 60:04.1f}"
         return f'<p>Source {stamp(span["source_start_seconds"])}–{stamp(span["source_end_seconds"])} · {span["duration_seconds"]:.1f} seconds</p>'
-    rows = "".join(f'<tr><td><a href="{e(o["file"])}">{e(o["file"])}</a></td><td>{o["overlap_seconds"] / 60:.2f} min</td>'
+    def output_link(name):
+        return (Path(report["output_folder"]) / name).as_uri() if report.get("output_folder") else name
+    rows = "".join(f'<tr><td><a href="{e(output_link(o["file"]))}">{e(o["file"])}</a></td><td>{o["overlap_seconds"] / 60:.2f} min</td>'
                    f'<td>{o["samples"]:,}</td><td>{e(o["utc_start"])}<br>{e(o["utc_end"])}</td></tr>' for o in report["outputs"])
     cards = "".join(f'<article><img src="{e(m.get("preview", Path(m["file"]).stem + ".jpg"))}"><h3>{e(m["source"])}</h3>'
                     f'<p>Rotation: {m["rotation_clockwise"]}° clockwise · {m["verification"]["dimensions"][0]} × '

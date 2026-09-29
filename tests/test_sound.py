@@ -11,6 +11,8 @@ import math
 import sys
 import time
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 import wave
 
 from goprovbox.engine import Scan, encode, export, fingerprint, intersections
@@ -34,7 +36,7 @@ def correlation(a, b):
     return sum(x*y for x, y in zip(a, b)) / math.sqrt(sum(x*x for x in a)*sum(y*y for y in b))
 
 
-class SoundTests(unittest.TestCase):
+class SoundTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup); self.folder = Path(temp.name)
         self.gopro = self.folder/'GX010001.mp4'
@@ -68,7 +70,9 @@ class SoundTests(unittest.TestCase):
         vbo = self.vbo(2017, 4117)
         scan = self.scan(vbo)
         result = export(scan, self.folder/'out', encoder='software')
-        report = json.loads((result/'report.json').read_text()); media = report['media'][0]
+        self.assertEqual({p.suffix for p in result.iterdir()}, {'.mp4', '.vbo'})
+        self.assertEqual(len(list(result.iterdir())), 2)
+        report = json.loads(export_report_path(result, "report.json").read_text()); media = report['media'][0]
         self.assertEqual(report['settings']['audio_source'], 'vbox')
         self.assertEqual({s['kind'] for s in media['audio']['plan']['segments']}, {'vbox'})
         self.assertAlmostEqual(media['audio']['plan']['segments'][0]['source_start_seconds'], 4, places=4)
@@ -107,7 +111,7 @@ class SoundTests(unittest.TestCase):
         self.assertLess(len(str(output/'GoPro_GX010001_0001.mp4')), 260)
         result = export(scan, output, encoder='software',
                         crops={self.clip.path.name: {'mode':'custom', 'x':.5, 'y':.75}})
-        report = json.loads((result/'report.json').read_text())
+        report = json.loads(export_report_path(result, "report.json").read_text())
         self.assertEqual(report['status'], 'complete')
         self.assertEqual(report['media'][0]['audio']['source'], 'vbox_preferred')
         self.assertTrue(report['outputs'][0]['telemetry_preserved'])
@@ -269,7 +273,7 @@ class SoundTests(unittest.TestCase):
         self.recording(self.folder/'VBOX0001_0001.mp4', 12, 'sin(2*PI*500*t)')
         result = export(self.scan(self.vbo(2017, 4117)), self.folder/'out',
                         encoder='software', audio_source='gopro')
-        report = json.loads((result/'report.json').read_text())
+        report = json.loads(export_report_path(result, "report.json").read_text())
         self.assertEqual(report['media'][0]['audio']['source'], 'gopro')
         self.assertGreater(correlation(samples(self.gopro, 2.4, .3),
                                        samples(result/report['media'][0]['file'], .4, .3)), .98)

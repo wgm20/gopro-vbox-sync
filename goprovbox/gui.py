@@ -17,6 +17,7 @@ from PIL import Image, ImageTk
 
 from . import __version__
 from .engine import scan_folder, export
+from .reports import export_report_path
 from .media import preview
 from .crop import rectangle
 from .distribution import (asset, data_directory, tools_ready, download_tools, copy_demo,
@@ -171,7 +172,7 @@ class App:
         self.create.pack(side="left")
         self.stop = ttk.Button(actions, text="Cancel", command=self.cancel_work, state="disabled"); self.stop.pack(side="left", padx=8)
         self.open_result = ttk.Button(actions, text="Open folder", command=lambda: open_path(self.result), state="disabled"); self.open_result.pack(side="right")
-        self.open_report = ttk.Button(actions, text="Report", command=lambda: open_path(self.result / "Report.html"), state="disabled"); self.open_report.pack(side="right", padx=8)
+        self.open_report = ttk.Button(actions, text="Report", command=self.show_report, state="disabled"); self.open_report.pack(side="right", padx=8)
         self.folder.trace_add("write", self.folder_changed)
         self.folder_changed(); self.overlay_changed()
         root.protocol("WM_DELETE_WINDOW", self.close); root.after(100, self.poll)
@@ -409,6 +410,12 @@ class App:
             finally:
                 self.events.put(("idle", None))
         Thread(target=work, daemon=True).start()
+
+    def show_report(self):
+        try:
+            open_path(export_report_path(self.result))
+        except OSError as exc:
+            messagebox.showerror("Export report", str(exc))
 
     def begin_scan(self):
         if not tools_ready():

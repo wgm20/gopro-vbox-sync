@@ -8,6 +8,8 @@ import json
 import shutil
 import tarfile
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from PIL import Image
 from goprovbox.engine import Match, Scan, export, fingerprint, encode, dimensions
@@ -52,7 +54,7 @@ def four_channel_vbo(folder):
     return vbo
 
 
-class OverlayTests(unittest.TestCase):
+class OverlayTests(ExportTestCase):
     def setUp(self):
         self.temp=TemporaryDirectory(); self.addCleanup(self.temp.cleanup); self.folder=Path(self.temp.name)
         self.vbo=four_channel_vbo(self.folder); self.clip=replace(video(self.folder/"video.mp4",duration=3),width=320,height=180)
@@ -207,7 +209,7 @@ class OverlayTests(unittest.TestCase):
         with patch("goprovbox.overlay.load_scene",return_value=self.scene):
             result=export(scan,self.folder/"out",overlay_scene=self.folder/"scene.vvhsn",encoder="software")
             self.assertEqual(export(scan,result,overlay_scene=self.folder/"scene.vvhsn",encoder="software"),result)
-        report=json.loads((result/"report.json").read_text())
+        report=json.loads(export_report_path(result, "report.json").read_text())
         self.assertTrue(report["outputs"][0]["telemetry_preserved"])
         self.assertIn("Cam2",report["settings"]["overlay"]["omitted_elements"])
 

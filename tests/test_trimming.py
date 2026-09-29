@@ -10,6 +10,8 @@ import json
 import math
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from PIL import Image, ImageChops, ImageStat
 from goprovbox.crop import rectangle
@@ -27,7 +29,7 @@ def timestamps(start_ms, stop_ms):
     return [f'1200{ms // 1000:02d}.{ms % 1000:03d}' for ms in range(start_ms, stop_ms + 1, 100)]
 
 
-class TrimPlanTests(unittest.TestCase):
+class TrimPlanTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup); self.folder = Path(temp.name)
         self.clip = video(self.folder / 'GX010001.mp4', duration=8)
@@ -75,7 +77,7 @@ class TrimPlanTests(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
-class TrimEncodingTests(unittest.TestCase):
+class TrimEncodingTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup); self.folder = Path(temp.name)
         self.source = self.folder / 'GX010001.mp4'
@@ -98,7 +100,7 @@ class TrimEncodingTests(unittest.TestCase):
         vbo = fixture(self.folder / 'test.vbo', timestamps(2017, 4117)); scan = self.scan(vbo)
         result = export(scan, encoder='software')
         self.assertTrue(result.name.endswith(' Matched'))
-        report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+        report = json.loads(export_report_path(result, "report.json").read_text(encoding='utf-8'))
         self.assertTrue(report['settings']['overlap_only'])
         media = report['media'][0]; movie = result / media['file']
         self.assertEqual(media['range']['source_start_seconds'], 2)
@@ -128,7 +130,7 @@ class TrimEncodingTests(unittest.TestCase):
     def test_gaps_export_two_numbered_clips_with_correct_data_links(self):
         vbo = fixture(self.folder / 'test.vbo', timestamps(1000, 3100) + timestamps(5000, 7100))
         result = export(self.scan(vbo), self.folder / 'gaps', encoder='software')
-        report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+        report = json.loads(export_report_path(result, "report.json").read_text(encoding='utf-8'))
         self.assertEqual(len(report['media']), 2); self.assertEqual(len(report['outputs']), 2)
         original = self.frame_values(self.source)
         for i, media in enumerate(report['media']):
@@ -165,7 +167,7 @@ class TrimEncodingTests(unittest.TestCase):
                  replace(self.clip, path=second, duration=3, clock=replace(self.clip.clock, origin=BASE+3))]
         vbo = fixture(self.folder / 'test.vbo', timestamps(900,5100))
         result = export(self.scan(vbo, clips), self.folder / 'chapters', encoder='software')
-        report = json.loads((result / 'report.json').read_text(encoding='utf-8'))
+        report = json.loads(export_report_path(result, "report.json").read_text(encoding='utf-8'))
         self.assertEqual([m['verification']['frames'] for m in report['media']], ['63','64'])
         self.assertEqual(len(report['outputs']), 1)
         output = read_vbo(result / report['outputs'][0]['file'])

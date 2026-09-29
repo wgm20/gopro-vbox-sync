@@ -4,6 +4,8 @@ from tempfile import TemporaryDirectory
 import json
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from goprovbox.media import executable, run, probe
 from goprovbox.engine import Scan, export, intersections, fingerprint
@@ -12,7 +14,7 @@ from tests.test_core import fixture, video
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"),"FFmpeg not installed")
-class FFmpegIntegrationTests(unittest.TestCase):
+class FFmpegIntegrationTests(ExportTestCase):
     def test_real_rotated_video_audio_and_safe_rerun(self):
         with TemporaryDirectory() as name:
             folder = Path(name)
@@ -25,7 +27,7 @@ class FFmpegIntegrationTests(unittest.TestCase):
             fingerprints = {p.name:fingerprint(p) for p in (source,vbo.path)}
             scan = Scan(folder,[clip],[vbo],intersections(vbo,clip),[],[],fingerprints)
             result = export(scan,folder / "output",encoder="software",overlap_only=False)
-            report = json.loads((result / "report.json").read_text())
+            report = json.loads(export_report_path(result, "report.json").read_text())
             self.assertEqual(report["status"],"complete")
             movie = result / report["media"][0]["file"]
             meta = probe(movie)

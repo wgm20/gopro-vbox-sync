@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b4 — clean finished folders
+
+- Finished exports contain only the MP4 videos and VBO data files needed by Circuit Tools.
+- Keeps reports, preview images and diagnostic logs in the app's local data folder. The Report button and verified reruns still work, and report links open the exported VBO files.
+- Copies and verifies supporting files before moving them out of an older export; video and telemetry files are retained unchanged. Failed exports still retain diagnostic information.
+
 ## 1.6.0b3 — export from long recording-folder paths
 
 - Fixes the missing temporary audio-file error when exporting from a deeply nested recording folder. Shorter temporary folder and diagnostic log names leave room for aligned sound and video files within Windows path limits.

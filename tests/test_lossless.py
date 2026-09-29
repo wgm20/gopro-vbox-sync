@@ -5,6 +5,8 @@ from unittest.mock import patch
 import json
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from goprovbox.engine import Scan, export, intersections, fingerprint, encode
 from goprovbox.gpmf import TelemetryError
@@ -15,7 +17,7 @@ from tests.test_core import fixture, video, BASE
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg not installed")
-class LosslessTests(unittest.TestCase):
+class LosslessTests(ExportTestCase):
     def setUp(self):
         self.temporary = TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -73,7 +75,7 @@ class LosslessTests(unittest.TestCase):
         shutil.copyfile(self.source, second)
         clips = [video(self.source, duration=3), video(second, start=BASE+3, duration=3)]
         result = export(self.scan(clips), self.folder / "chapters", encoder="software", overlap_only=False)
-        report = json.loads((result / "report.json").read_text())
+        report = json.loads(export_report_path(result, "report.json").read_text())
         self.assertEqual(len(report["outputs"]), 1)
         self.assertEqual(len(report["outputs"][0]["videos"]), 2)
         exported = read_vbo(result / report["outputs"][0]["file"])

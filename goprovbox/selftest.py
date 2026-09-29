@@ -9,6 +9,7 @@ import tkinter as tk
 from . import __version__
 from .distribution import asset, uninstall_command
 from .engine import scan_folder, export
+from .reports import export_report_path
 from .media import probe, run, executable
 from .vbo import read_vbo
 
@@ -46,11 +47,12 @@ def run_self_test(destination: Path):
         with path.open("rb") as handle:
             handle.read(1)
     videos = list(result.glob("*.mp4"))
+    assert all(p.suffix in (".mp4", ".vbo") for p in result.iterdir())
     assert len(videos) == 1
     assert len(list(result.glob("*.vbo"))) == 1
     assert probe(videos[0])["streams"][0]["width"] == 640
     assert probe(videos[0])["streams"][0]["height"] == 320
-    exported = json.loads((result / "report.json").read_text(encoding="utf-8"))
+    exported = json.loads(export_report_path(result, "report.json").read_text(encoding="utf-8"))
     assert exported["settings"]["overlap_only"]
     assert exported["media"][0]["range"]["source_start_seconds"] == 2
     assert exported["media"][0]["verification"]["frames"] == "300"
@@ -85,14 +87,16 @@ def run_self_test(destination: Path):
     root.destroy()
     linked = read_vbo(result / exported["outputs"][0]["file"])
     assert int(linked.rows[0].values[linked.index("avitime")]) == 0
-    assert (result / "Report.html").is_file()
+    assert export_report_path(result).is_file()
     assert asset("quick-start.html").is_file()
     report = {"version": __version__, "frozen": bool(getattr(sys, "frozen", False)),
               "uninstaller_available": uninstall_command() is not None,
               "passed": True, "matched_videos": 2, "exported_videos": 1, "export_folder": str(result),
+              "report_file": str(export_report_path(result)),
               "checks": ["Tk and packaged icon", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor", "four-channel overlay", "encoded video and VBO verification",
-                         "VBOX sound and decoded alignment at both ends", "long output folder with short temporary paths", "offline help"],
+                         "VBOX sound and decoded alignment at both ends", "long output folder with short temporary paths",
+                         "MP4 and VBO only in output; report stored separately", "offline help"],
               "limits": "Does not test Circuit Tools acceptance or a fresh Windows machine."}
     (destination / "self-test.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report

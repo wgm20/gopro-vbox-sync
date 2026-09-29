@@ -7,6 +7,8 @@ import json
 import queue
 import shutil
 import unittest
+from tests.export_case import ExportTestCase
+from goprovbox.reports import export_report_path
 
 from goprovbox.engine import Scan, export, fingerprint, intersections, select_for_export
 from goprovbox.gpmf import TelemetryError
@@ -14,7 +16,7 @@ from goprovbox.media import executable, run
 from tests.test_core import fixture, video
 
 
-class SelectionTests(unittest.TestCase):
+class SelectionTests(ExportTestCase):
     def setUp(self):
         temp = TemporaryDirectory(); self.addCleanup(temp.cleanup)
         self.folder = Path(temp.name)
@@ -87,7 +89,7 @@ class SelectionTests(unittest.TestCase):
         chosen = {second.path.name}
         result = export(self.scan, self.folder / 'out', include_videos=chosen,
                         rotations={first.path.name:270}, crops={first.path.name:'top'}, encoder='software')
-        report = json.loads((result / 'report.json').read_text())
+        report = json.loads(export_report_path(result, "report.json").read_text())
         self.assertEqual([m['source'] for m in report['media']], [second.path.name])
         self.assertEqual(report['settings']['included_videos'], [second.path.name])
         self.assertEqual(report['excluded_videos'], [first.path.name])

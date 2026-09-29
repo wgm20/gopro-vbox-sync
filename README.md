@@ -16,7 +16,7 @@ Use the download page's **Download for Windows** button. No Python installation,
 2. Put the GoPro MP4 files in the folder with your VBOX runs. Choose that folder and click **Scan**. Subfolders are ignored.
 3. Tick the videos to **Include**. Click each row to inspect its preview. Rotation defaults to **Upright — no rotation**; change it when needed. Keep the original VBOX MP4/AVI files beside the VBO files to enable cropping.
 4. Choose resolution and overlay, then open **Frame & preview…**. Tick **Crop to VBOX**, drag the crop box on the left and check the finished picture on the right. Arrow keys allow fine adjustments. Click **Apply**, then **Create files**. Each video has its own framing. **Only export video with VBOX data** starts ticked; untick it to keep full videos. The app remembers that choice.
-5. Read the **Report**. Keep the generated MP4 and VBO files together. The MP4 also plays in ordinary video players.
+5. The finished folder contains only MP4 and VBO files; keep them together. The MP4 also plays in ordinary video players. Use the app's **Report** button for the export summary.
 
 **Start with Help → Try practice recordings.** Two short synthetic movies and matching data are included. Try unticking one run and exporting the other. The illustrated **Help → Quick-start guide** works offline and covers setup, overlays, troubleshooting and privacy.
 
@@ -58,7 +58,7 @@ Selecting a `.VVHSN` scene requires a separate installation of **VBOX Video Setu
 
 Processing stays on your computer. There is no activation, account, analytics or automatic update service. Internet access is used only for requested video-tools setup or when you open external links. **Help → Check for updates** opens the releases page; installing updates remains your choice.
 
-Settings, practice copies, error logs and downloaded tools live in `%LOCALAPPDATA%\GoProVBOXSync`. Uninstalling retains them and your exports. Review reports before sharing: they may contain source paths, filenames and GPS data.
+Settings, export reports, preview images, diagnostic logs, practice copies and downloaded tools live in `%LOCALAPPDATA%\GoProVBOXSync`. Uninstalling retains them and your exports. Review reports before sharing: they may contain source paths, filenames and GPS data.
 
 The app and synthetic demo are [MIT licensed](LICENSE): use, modify and share them freely with the licence notice. [Third-party notices](THIRD_PARTY_NOTICES.md) apply separately. This project is independent and is not affiliated with or endorsed by GoPro or Racelogic.
 
