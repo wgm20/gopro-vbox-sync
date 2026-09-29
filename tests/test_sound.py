@@ -99,7 +99,7 @@ class SoundTests(unittest.TestCase):
         scan = self.scan(self.vbo(2017, 4117))
         # Match the reported Windows failure: the final output paths fit, but
         # repeating the output folder's name in staging pushed audio past 260.
-        parent = self.folder/'Race day recordings'
+        parent = (self.folder/'Race day recordings').resolve()
         parent /= 'x' * max(1, 182 - len(str(parent)) - 1)
         output = parent/'GoPro Circuit Tools Overlay Cropped Matched'
         old_audio = parent/('.'+output.name+'.working-12345678')/'GoPro_GX010001_0001.audio.wav'

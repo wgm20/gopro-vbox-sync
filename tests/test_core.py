@@ -366,7 +366,7 @@ class VBOTests(unittest.TestCase):
         self.assertFalse((self.folder / "output").exists())
         reports = list(self.folder.glob(".gvs-*/report.json"))
         self.assertEqual(json.loads(reports[0].read_text())["status"],"failed")
-        self.assertEqual(json.loads(reports[0].read_text())["output_folder"], str(self.folder / "output"))
+        self.assertEqual(json.loads(reports[0].read_text())["output_folder"], str((self.folder / "output").resolve()))
 
     def test_cancel_before_encoding_never_publishes(self):
         vbo = fixture(self.folder / "data.vbo")

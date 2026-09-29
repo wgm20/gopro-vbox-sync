@@ -34,7 +34,7 @@ def run_self_test(destination: Path):
     custom = {"mode": "custom", "x": .5, "y": .75}
     # Exercise the packaged app at the reported long-path boundary, including
     # WAV preparation, muxing, logs, previews and the final folder rename.
-    output_parent = destination / "Race day recordings"
+    output_parent = (destination / "Race day recordings").resolve()
     output_parent /= "x" * max(1, 182 - len(str(output_parent)) - 1)
     output = output_parent / "GoPro Circuit Tools Overlay Cropped Matched"
     legacy_audio = output_parent / ("." + output.name + ".working-12345678") / "GoPro_GX01D001_0001.audio.wav"
