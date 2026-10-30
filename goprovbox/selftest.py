@@ -15,6 +15,7 @@ from .vbo import read_vbo, write_vbo
 
 
 def run_self_test(destination: Path, *, scene_path: Path | None = None):
+    destination = destination.resolve()
     destination.mkdir(parents=True, exist_ok=False)
     root = tk.Tk(); root.withdraw()
     icon = tk.PhotoImage(file=str(asset("icon.png")))

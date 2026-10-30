@@ -2,9 +2,9 @@
 
 **Free Windows software for pairing GoPro video with VBOX telemetry.**
 
-[**Download for Windows →**](https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b12/GoPro-VBOX-Sync-1.6.0b12-Setup.exe)
+[**Download for Windows →**](https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b13/GoPro-VBOX-Sync-1.6.0b13-Setup.exe)
 
-**Version 1.6.0b12 · Released 30 October 2026.** No Python installation, payment, activation or GitHub account is needed. Visit the [download page](https://wgm20.github.io/gopro-vbox-sync/) for an overview. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b12): extract the entire folder before opening GoProVBOXSync.exe.
+**Version 1.6.0b13 · Released 30 October 2026.** No Python installation, payment, activation or GitHub account is needed. Visit the [download page](https://wgm20.github.io/gopro-vbox-sync/) for an overview. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b13): extract the entire folder before opening GoProVBOXSync.exe.
 
 > **Beta: Circuit Tools 3 compatibility is unresolved.** Circuit Tools can reject generated VBO files with an authenticity/checksum error and may close. Re-encoding is not a proven fix. A successful export does not guarantee Circuit Tools acceptance. Test a short run first.
 

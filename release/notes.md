@@ -1,4 +1,4 @@
-# GoPro VBOX Sync 1.6.0b12 — 30 October 2026
+# GoPro VBOX Sync 1.6.0b13 — 30 October 2026
 
 Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. This release includes all changes since the public 1.6.0b4 download.
 
@@ -10,7 +10,7 @@ Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. 
 
 Lap times are reconstructed from VBOX data using the overlay's timing method and may differ from the recorder. Incomplete laps and laps crossing data gaps are excluded. Scene rendering covers a tested subset; inspect the preview before exporting.
 
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b12-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b13-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved, and the exported MP4 also plays in ordinary video players.
 
