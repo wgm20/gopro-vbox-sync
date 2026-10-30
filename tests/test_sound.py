@@ -15,7 +15,7 @@ from tests.export_case import ExportTestCase
 from goprovbox.reports import export_report_path
 import wave
 
-from goprovbox.engine import Scan, encode, export, fingerprint, intersections
+from goprovbox.engine import Scan, encode, export, fingerprint, intersections, scan_folder
 from goprovbox.gpmf import TelemetryError
 from goprovbox.media import executable, probe, run
 from goprovbox.sound import RATE, AudioPlan, AudioSpan, attach_audio, fit_audio_clock, plan_audio, render_audio, _process
@@ -85,6 +85,32 @@ class SoundTests(ExportTestCase):
         self.assertEqual(export(scan, result, encoder='software'), result)
         with self.assertRaisesRegex(TelemetryError, 'already exists'):
             export(scan, result, encoder='software', audio_source='gopro')
+
+    def test_separate_card_uses_sound_and_crop_from_vbox_folder(self):
+        original = self.folder / 'VBOX0001_0001.mp4'
+        run([executable('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=s=160x90:r=30',
+             '-f', 'lavfi', '-i', 'aevalsrc=sin(2*PI*(200*t+20*t*t)):s=48000',
+             '-t', '8', '-c:v', 'libx264', '-c:a', 'alac', str(original)])
+        self.vbo(2017, 4117)
+        card = self.folder / 'SD card'
+        dcim = card / 'DCIM' / '100GOPRO'; dcim.mkdir(parents=True)
+        moved = self.gopro.rename(dcim / self.gopro.name)
+        clip = replace(self.clip, path=moved)
+        # This synthetic movie has no camera metadata; keep real VBO reading,
+        # companion lookup, sound alignment, cropping and encoding in the test.
+        with patch('goprovbox.engine.probe', return_value={'streams': [{'codec_tag_string': 'gpmd'}]}), \
+                patch('goprovbox.engine.inspect_video', return_value=clip):
+            scan = scan_folder(self.folder, gopro_folder=card, recursive_gopro=True)
+        self.assertAlmostEqual(scan.crop_references[clip.path.name].aspect, 16 / 9)
+        result = export(scan, encoder='software', max_size=0, crops={clip.path.name: 'centre'})
+        report = json.loads(export_report_path(result, 'report.json').read_text())
+        media = report['media'][0]
+        self.assertEqual(result.parent, self.folder)
+        self.assertEqual(media['verification']['dimensions'], [160, 90])
+        self.assertEqual({s['kind'] for s in media['audio']['plan']['segments']}, {'vbox'})
+        self.assertGreater(correlation(samples(original, 4.4, .3), samples(result / media['file'], .4, .3)), .98)
+        self.assertTrue(report['outputs'][0]['telemetry_preserved'])
+        self.assertTrue(moved.is_file())
 
     def test_nonzero_video_timestamp_and_audio_start_are_retained(self):
         original = self.folder/'VBOX0001_0001.mp4'

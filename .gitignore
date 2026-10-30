@@ -17,3 +17,6 @@ scratch/
 # Locally generated examples contain private recordings and scene artwork.
 Examples/
 *.egg-info/
+goprovbox/assets/scene-reader.dll
+goprovbox/assets/scene-reader.runtimeconfig.json
+goprovbox/assets/.scene-reader-build.json

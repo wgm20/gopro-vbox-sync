@@ -12,6 +12,7 @@ import zipfile
 from public_files import ROOT, public_files
 sys.path.insert(0, str(ROOT))
 from goprovbox import __version__
+from goprovbox.scene_reader import build_helper
 
 
 def build_icons():
@@ -28,6 +29,7 @@ def main():
     if os.name != "nt": raise SystemExit("Build on 64-bit Windows")
     os.chdir(ROOT)
     icons = ROOT / "goprovbox/assets"
+    build_helper(icons)
     build_icons()
     notices = icons / "licenses"; notices.mkdir(exist_ok=True)
     shutil.copy2(ROOT / "LICENSE", notices / "MIT.txt")
@@ -41,7 +43,7 @@ def main():
         if not (notices / (name + ".txt")).is_file(): raise RuntimeError(f"Missing {name} notice")
     build = ROOT / "build"; build.mkdir(exist_ok=True)
     (build / "version-info.txt").write_text('''VSVersionInfo(
-      ffi=FixedFileInfo(filevers=(1,6,0,4), prodvers=(1,6,0,4), mask=0x3f, flags=2,
+      ffi=FixedFileInfo(filevers=(1,6,0,11), prodvers=(1,6,0,11), mask=0x3f, flags=2,
                        OS=0x40004, fileType=1, subtype=0, date=(0,0)),
       kids=[StringFileInfo([StringTable('040904B0', [
         StringStruct('CompanyName','GoPro VBOX Sync contributors'),

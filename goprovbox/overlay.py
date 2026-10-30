@@ -1,7 +1,9 @@
 """Data-only overlays, using logged (already calibrated) VBOX values.
 
-VVHSN is read with the user's installed Racelogic library. No vendor binaries,
-keys, fonts or artwork are redistributed. Archive members remain in memory.
+VVHSN is read with the user's installed Racelogic library. Saved .gvscene
+packages hold already-imported scene members and need no vendor library.
+No vendor binaries, keys, fonts or artwork are redistributed. Archive members
+remain in memory.
 """
 from __future__ import annotations
 
@@ -9,20 +11,17 @@ from bisect import bisect_left
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
-from tempfile import TemporaryDirectory
 import hashlib
 import io
 import math
 import os
 import re
-import subprocess
 import tarfile
 import xml.etree.ElementTree as ET
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .gpmf import TelemetryError
-from .media import CREATE_NO_WINDOW
 
 CHANNELS = {"speed": ("velocity",), "rpm": ("rpm", "engine_speed"),
             "throttle": ("tps", "throttle"), "brake": ("brake", "brake_pressure")}
@@ -66,28 +65,18 @@ def scene_number(fmt, value):
 def read_scene_archive(path: Path) -> dict[str, bytes]:
     if path.stat().st_size > MAX_ARCHIVE:
         raise TelemetryError("Scene file exceeds the 32 MB limit")
+    if path.suffix.lower() == ".gvscene":
+        members = archive_members(path.read_bytes())
+        missing = sorted({"SCENE.XML", "VBOXHD.XML"} - members.keys())
+        if missing:
+            raise TelemetryError("Saved scene package is missing " + ", ".join(missing))
+        return members
     if path.suffix.lower() != ".vvhsn":
-        raise TelemetryError("Choose a VBOX HD2 .VVHSN scene file")
+        raise TelemetryError("Choose a VBOX HD2 .VVHSN file or saved .gvscene package")
     if os.name != "nt":
         raise TelemetryError("Reading VVHSN scenes requires VBOX Video Setup on Windows")
-    library = Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "Racelogic/VBOX Video/Racelogic.Core.dll"
-    if not library.is_file():
-        raise TelemetryError("Install VBOX Video Setup to use a VVHSN scene, or leave Scene blank for the built-in dashboard")
-    # Values travel in the environment, never in executable PowerShell source.
-    script = "$ErrorActionPreference='Stop'; $a=[Reflection.Assembly]::LoadFrom($env:GVS_SCENE_LIBRARY); $r=[Activator]::CreateInstance($a.GetType('Racelogic.Core.TripleDESEncryption')); $r.Decrypt($env:GVS_SCENE_SOURCE,$env:GVS_SCENE_DEST)"
-    with TemporaryDirectory(prefix="gvs-scene-") as tmp:
-        dest = Path(tmp) / "scene.tar"
-        env = os.environ | {"GVS_SCENE_LIBRARY": str(library), "GVS_SCENE_SOURCE": str(path.resolve()), "GVS_SCENE_DEST": str(dest)}
-        try:
-            proc = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                                  env=env, capture_output=True, timeout=30, creationflags=CREATE_NO_WINDOW)
-            if proc.returncode or not dest.is_file():
-                raise TelemetryError("VBOX Video Setup could not read this scene. Try opening it in the scene editor first.")
-            if dest.stat().st_size > MAX_ARCHIVE:
-                raise TelemetryError("Expanded scene exceeds the 32 MB limit")
-            return archive_members(dest.read_bytes())
-        except subprocess.TimeoutExpired as exc:
-            raise TelemetryError("Reading the VBOX scene timed out") from exc
+    from .scene_reader import read_scene_files
+    return read_scene_files(path, max_size=MAX_ARCHIVE)
 
 
 def archive_members(data: bytes) -> dict[str, bytes]:
@@ -104,7 +93,7 @@ def archive_members(data: bytes) -> dict[str, bytes]:
                 if not member.isfile() or name in result:
                     raise TelemetryError("Invalid or duplicate scene archive member")
                 total += member.size
-                if total > MAX_ARCHIVE or len(result) >= 512:
+                if total > MAX_ARCHIVE or len(result) >= 2048:
                     raise TelemetryError("Scene archive exceeds size limits")
                 result[name] = archive.extractfile(member).read()
     except tarfile.TarError as exc:
@@ -155,10 +144,12 @@ def load_scene(path: Path, mode="four") -> Scene:
         raise TelemetryError("Unknown scene mode")
     if hashlib.sha256(path.read_bytes()).hexdigest() != before:
         raise TelemetryError("Scene changed while being read; select it again")
+    if path.suffix.lower() == ".gvscene":
+        scene.options.setdefault("notes", []).append("Loaded from a local saved scene package.")
     return scene
 
 
-def parse_scene(members, name="Scene", digest="") -> Scene:
+def parse_scene(members, name="Scene", digest="", *, require_four_channels=True) -> Scene:
     """Supported subset: the four requested channels as text and bars + artwork.
 
     Other widgets are explicitly reported. No camera region is ever imported.
@@ -201,21 +192,29 @@ def parse_scene(members, name="Scene", digest="") -> Scene:
                 im = asset(path)
                 statics.append((e, pos, im))
                 continue
-            source, scale = datasource(e.get("datasource", ""))
+            try:
+                source, scale = datasource(e.get("datasource", ""))
+            except (TelemetryError, ValueError):
+                if require_four_channels:
+                    raise
+                omitted.append(e.get("name", e.tag)); continue
             can = re.fullmatch(r"can\.bin\[\d+\]\.channel\(([^)]+)\)", source)
             column = can[1].lower() if can else "velocity" if source == "vbox.speed_gnd_mps" else ""
             key = next((k for k, aliases in CHANNELS.items() if column in aliases), None)
             if key is None:
                 omitted.append(e.get("name", e.tag)); continue
             if e.tag not in ("text", "multibar"):
+                if not require_four_channels:
+                    omitted.append(e.get("name", e.tag)); continue
                 raise TelemetryError(f"{key}: this scene's {e.tag} widget is not supported yet; use the built-in dashboard")
             binding = {"column": column, "factor": scale / 3.6 if key == "speed" else scale,
                        "unit": ("mph" if abs(scale - 2.236936292054402) < 1e-7 else "km/h" if abs(scale - 3.6) < 1e-7 else "m/s") if key == "speed" else units.get(column, "")}
             if key == "speed" and not any(abs(scale-s) < 1e-7 for s in (1, 3.6, 2.236936292054402)):
                 raise TelemetryError("Unsupported speed display scale")
-            if key in bindings and bindings[key] != binding:
+            if require_four_channels and key in bindings and bindings[key] != binding:
                 raise TelemetryError(f"Scene has conflicting {key} display scales")
-            bindings[key] = binding
+            if require_four_channels or key not in bindings:
+                bindings[key] = binding
             background = asset(image_paths[e.get("background")]) if e.get("background") else None
             if e.tag == "text":
                 font = fonts[e.get("font")]
@@ -242,7 +241,7 @@ def parse_scene(members, name="Scene", digest="") -> Scene:
                 element = {"kind": "bar", "key": key, "pos": pos, "size": background.size, "bars": bars, "image": background}
             element["name"] = e.get("name")
             elements.append(element)
-        if set(bindings) != set(CHANNELS):
+        if require_four_channels and set(bindings) != set(CHANNELS):
             raise TelemetryError("Scene must contain speed, RPM, throttle and brake text/bar widgets; use the built-in dashboard otherwise")
         # Include backing panels that overlap a selected widget, and nearby labels
         # that explicitly name a selected channel. Exclude every PiP border.
@@ -284,6 +283,8 @@ class Timeline:
             # custom units follow in the same order as the custom columns.
             known_units = dict(zip(custom, unit_lines[-len(custom):])) if custom and len(unit_lines) >= len(custom) else {}
             for key in ("rpm", "throttle", "brake"):
+                if key not in bindings:
+                    continue
                 expected = bindings[key]["unit"].lower()
                 actual = known_units.get(bindings[key]["column"], "")
                 if not expected or actual != expected:

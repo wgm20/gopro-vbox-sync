@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gopro-vbox-sync"
-version = "1.6.0b4"
+version = "1.6.0b11"
 description = "Synchronise GoPro video with original VBOX telemetry for Circuit Tools 3"
 requires-python = ">=3.11"
 dependencies = ["Pillow>=10.1"]
@@ -21,4 +21,4 @@ gopro-vbox = "goprovbox.__main__:main"
 include = ["goprovbox*"]
 
 [tool.setuptools.package-data]
-goprovbox = ["assets/*", "assets/demo/*", "assets/licenses/*"]
+goprovbox = ["*.cs", "assets/*", "assets/demo/*", "assets/licenses/*"]

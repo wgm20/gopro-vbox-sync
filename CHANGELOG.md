@@ -1,5 +1,60 @@
 # Release notes
 
+## 1.6.0b11 — released 2026-10-30
+
+This release includes the development milestones below since the public 1.6.0b4 release.
+
+- Moves **Resolution**, **Overlay**, **Sound**, **Only export video with VBOX data** and **Include GoPro subfolders** into **Options** beside **Help**. The same menu contains **Details…** and **What do red stars mean?**, keeping the main window focused on choosing, previewing and creating videos.
+- Starts **Include GoPro subfolders** ticked for desktop users, including those with an older saved preference that disabled it, and remembers new choices. Removes the folder-reset helper text from the main window.
+- Keeps **Scan for matches** and its explanation beneath both source paths. Clearing the GoPro path still restores the VBOX folder; separate locations remain remembered. Advanced command-line scans retain `--no-gopro-recursive`.
+- Adds separate VBOX and GoPro source folders, including SD-card subfolders, without copying footage. GoPro videos defaults to the VBOX folder until a separate path is set; source recordings remain unchanged and duplicate filenames are reported.
+- Adds GPS recording dates, local/UTC start times and sortable **Best in file** times before conversion. Only complete laps wholly inside each file qualify; a separate red star marks whole-run fastest-lap footage, including both parts of a split lap. Details retains the whole-run best and explains missing times.
+- Imports new supported `.VVHSN` scenes through the installed VBOX Video Setup public importer and its .NET 8 Windows Desktop Runtime. The app supplies its own helper; users do not need PowerShell 7 or a .NET SDK. Supports more older scene layouts while reporting unsupported content.
+- Adds reusable `.gvscene` scene packages containing artwork and fonts from a previous import, for full-scene previews and exports without VBOX Video Setup. Vendor libraries and private scenes are not bundled.
+
+## 1.6.0b10 — development milestone
+
+- Replaces the repeated **Run best** with **Best in file**: the fastest complete VBOX lap wholly within each GoPro file's GPS time range. Laps split across files do not supply a per-file time; **—** means no complete lap is available.
+- Uses a separate red star to mark footage from the whole-run fastest lap. Both files are marked if that lap crosses a chapter boundary, independently of their per-file best times. Details retains the whole-run best and explains split-lap coverage.
+- Keeps date/start columns, local/UTC display, folder defaults, **Scan for matches** and scene import.
+
+## 1.6.0b9 — development milestone
+
+- Groups the VBOX and GoPro paths under **Choose recording folders**, aligns their Browse buttons and places **Scan for matches** beneath both paths. The accompanying note explains that matching comes before choosing videos to convert.
+- Retains the automatic GoPro folder default, remembered separate sources, SD-card scanning, run-selection details and scene import.
+
+## 1.6.0b8 — development milestone
+
+- Removes the **Same as VBOX folder** checkbox. **GoPro videos** automatically uses the chosen VBOX folder until a separate GoPro location is selected or typed, and the field stays editable.
+- Remembers a separate GoPro folder across app restarts without changing it when the VBOX folder changes. Clearing the GoPro field restores the VBOX folder when scanning or choosing another VBOX folder. Existing folder preferences are retained.
+- Keeps **Include GoPro subfolders**, SD-card scanning, run-selection details and scene import available.
+
+## 1.6.0b7 — development milestone
+
+- Adds GPS-based recording date and start time, local/UTC display and the fastest complete VBOX lap to the selection list before video conversion. Records start in chronological order and column headings can sort the list.
+- Marks GoPro chapters containing footage from a run's fastest lap with **★**. The original repeated whole-run display is replaced by per-file best times and a separate red star in 1.6.0b10; Details retains the whole-run best and chapter coverage.
+- Calculates lap details once per VBOX run during scanning. Missing start/finish lines, incomplete laps and telemetry gaps produce unavailable lap information rather than guessed results. Lap times use the overlay's reconstructed timing method.
+- Retains new VVHSN import, saved scenes, separate GoPro sources, cropping and aligned VBOX sound.
+
+## 1.6.0b6 — development milestone
+
+- Imports new `.VVHSN` files through the installed VBOX Video Setup library's public scene importer. This replaces the incorrect direct call to its guarded low-level decryption method, so importing a new scene no longer depends on a previously saved copy.
+- Runs the importer through a small app-owned .NET helper, using the editor's .NET 8 Windows Desktop Runtime. Users do not need PowerShell 7 or a .NET SDK. Vendor libraries and private artwork remain outside the distributed app.
+- Supports common older scene layouts with needle dials, fewer than four driving channels, braking-G bars, alternate lap displays, clocks with seconds and resultant-G calculations. Scene expressions are never evaluated as code.
+- Reports incompatible editor versions, missing runtime components and unsupported scene content clearly. Scene rendering still covers a tested subset; a successful file import does not guarantee every widget or data source can be rendered.
+- Retains `.gvscene` saved scene packages, separate GoPro/SD-card sources, source preservation, cropping and aligned VBOX sound.
+
+## 1.6.0b5 — development milestone
+
+- Adds reusable `.gvscene` saved scene packages for full-scene previews and exports. A saved package contains the configuration, artwork and fonts from an earlier import and opens locally without the VBOX Video Setup library. Private scene packages are not bundled or published with the app.
+- Extends the Scene picker to accept `.VVHSN` and `.gvscene`. Reports identify the selected saved scene and its contents remain unchanged during processing.
+- Explains the signed-caller refusal encountered by the old low-level reader and restores reusable scene copies. The direct reader is replaced by the public scene importer in 1.6.0b6.
+
+- Adds separate VBOX and GoPro folder choices, with an easy same-folder option and remembered locations. GoPro videos can be read directly from an SD card or any other folder without copying them beside the VBO files.
+- Includes optional GoPro subfolder scanning for card layouts such as `DCIM/100GOPRO`. VBOX data and its original video chapters remain together; the default output folder stays under the VBOX folder.
+- Adds command-line `--gopro-folder`, `--gopro-recursive` and `--no-gopro-recursive` options. Existing same-folder commands retain their top-level scan.
+- Checks the actual source paths before export and reports duplicate GoPro filenames with their locations so conflicting clips cannot be mixed up.
+
 ## 1.6.0b4 — clean finished folders
 
 - Finished exports contain only the MP4 videos and VBO data files needed by Circuit Tools.

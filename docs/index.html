@@ -39,8 +39,9 @@
   <p class="small">FREE · OPEN SOURCE · WINDOWS · BETA</p>
   <h1>Automatically add your VBOX data to your GoPro videos.</h1>
   <p>Combine high-quality GoPro footage with synchronised VBOX gauges and track maps. View speed, RPM, throttle and brake pressure on your video, and analyse your runs in Circuit Tools.</p>
-  <p><a class="button" href="https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b4/GoPro-VBOX-Sync-1.6.0b4-Setup.exe">Download for Windows</a></p>
-  <p class="small">Version 1.6.0b4 · Windows 10/11 x64 · No Python or account needed<br><a href="https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b4">More downloads and release notes</a></p>
+  <p><a class="button" href="https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b11/GoPro-VBOX-Sync-1.6.0b11-Setup.exe">Download for Windows</a></p>
+  <p class="small">Version 1.6.0b11 · Released 30 October 2026 · Windows 10/11 x64<br>No Python or account needed · <a href="https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b11">More downloads and release notes</a></p>
+  <p class="small"><strong>Beta limitation:</strong> Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error. This remains unresolved; test a short run first. The exported MP4 also plays in ordinary video players.</p>
 
   <section class="comparison" aria-labelledby="comparison-title">
     <h2 id="comparison-title">See the result in Circuit Tools</h2>
@@ -60,10 +61,18 @@
   <ol>
     <li>Install and open the app. Video tools download on request (110 MB).</li>
     <li>Choose <strong>Help → Try practice recordings</strong> to try the included demo.</li>
-    <li>Put the GoPro MP4 files in the folder with your VBOX runs. Scan and tick the videos to include.</li>
-    <li>Check rotation, then open <strong>Frame &amp; preview…</strong>. Drag a crop to the framing you want, check the output and create the files. Only matching periods are exported, with aligned VBOX sound by default.</li>
+    <li>Choose your <strong>VBOX runs</strong> folder. <strong>GoPro videos</strong> uses it automatically; browse for an SD card or any other folder if your videos are elsewhere. Subfolders are searched by default. No copying is needed.</li>
+    <li>Check both paths, then click <strong>Scan for matches</strong>. Compare <strong>Date</strong>, <strong>Start</strong> and <strong>Best in file</strong>, and tick the videos to include.</li>
+    <li>Use <strong>Options</strong> beside <strong>Help</strong> for resolution, overlay and sound. Check rotation, then open <strong>Frame &amp; preview…</strong> to crop and check the output before creating files. Only matching periods are exported, with aligned VBOX sound by default.</li>
   </ol>
   <p>The illustrated quick-start guide works offline. All processing stays on your computer.</p>
+  <h2>New in 1.6.0b11</h2>
+  <ul>
+    <li>Read GoPro originals directly from an SD card or another folder. The app remembers a separate GoPro location and your subfolder choice; exports still default to a new folder under your VBOX folder.</li>
+    <li>Choose footage before conversion using recording dates, local/UTC start times and <strong>Best in file</strong>: the fastest complete lap wholly inside that GoPro file. Split laps are excluded from this number. A separate red star marks footage of the whole-run fastest lap, including both files when it spans chapters.</li>
+    <li><strong>Options</strong> holds resolution, overlay, sound, trimming and subfolder settings. Use <strong>Options → Details…</strong> for lap and matching information, or <strong>Options → What do red stars mean?</strong> for marker help.</li>
+    <li>Import supported <code>.VVHSN</code> full scenes through a compatible <strong>VBOX Video Setup</strong> installation and its <strong>.NET 8 Windows Desktop Runtime</strong>. Reusable <code>.gvscene</code> packages open without the editor. Scene support covers a tested subset; inspect the preview.</li>
+  </ul>
   <p><a href="https://github.com/wgm20/gopro-vbox-sync">Source, documentation and support</a></p>
   <p class="small">MIT licensed. Independent project; not affiliated with GoPro or Racelogic.</p>
 </main>

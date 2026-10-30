@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ROOT_FILES = (".gitignore", ".gitattributes", "LICENSE", "README.md", "CONTRIBUTING.md", "BUILDING.md",
               "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "pyproject.toml", "requirements-build.txt",
               "GoProVBOXSync.spec", "launch.pyw")
-PATTERNS = ("goprovbox/*.py", "goprovbox/assets/*.html", "goprovbox/assets/*.png",
+PATTERNS = ("goprovbox/*.py", "goprovbox/*.cs", "goprovbox/assets/*.html", "goprovbox/assets/*.png",
             "goprovbox/assets/*.ico", "goprovbox/assets/demo/*.MP4", "goprovbox/assets/demo/*.vbo",
             "goprovbox/assets/demo/*.txt", "goprovbox/assets/licenses/*.txt", "tests/*.py",
             "scripts/*.py", "scripts/*.ps1", "release/*.iss", "release/*.txt", "release/*.md",

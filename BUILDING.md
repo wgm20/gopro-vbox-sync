@@ -19,6 +19,15 @@ $env:PATH = "$videoTools;$env:PATH"
 .\.venv-release\Scripts\python.exe scripts\test_installer.py
 ```
 
+`build_release.py` also builds the app-owned scene helper automatically. For a manual PyInstaller build, generate the helper and its runtime configuration first:
+
+```powershell
+.\.venv-release\Scripts\python.exe scripts\build_scene_reader.py
+.\.venv-release\Scripts\python.exe -m PyInstaller --noconfirm GoProVBOXSync.spec
+```
+
+The helper is compiled from `goprovbox/scene_reader.cs` with the C# compiler supplied with Windows; no .NET SDK is needed. At runtime, `.VVHSN` import requires a compatible VBOX Video Setup installation exposing the public scene importer and .NET 8 Windows Desktop Runtime. The helper resolves vendor dependencies from that installation. Neither the importer libraries nor scene artwork/fonts are copied into the app. PowerShell 7 is not a user requirement. Source checkouts compile and cache the helper on their first scene import; packaged apps carry the generated helper.
+
 `test_installer.py` installs the actual release into a new temporary folder, removes Python and FFmpeg from the child process's PATH, scans the packaged demo and exports one selected video with gauges. It checks frozen execution, then uninstalls and verifies that the export survived. Run this on a disposable build machine where GoPro VBOX Sync is not already installed: the installer uses the real application's uninstall registration. Evidence remains in the temporary folder; a summary is written to `release-output/validation.json`.
 
 This is an isolated-runtime test, not a claim of a completely clean Windows OS. Before removing the beta label, also test installation on fresh Windows 10 and 11 machines and resolve the Circuit Tools authenticity issue using original recordings. Synthetic data cannot establish recorder authenticity.
@@ -38,6 +47,6 @@ The GitHub Actions workflow tests each main-branch push and pull request. Pushin
 
 The public download page is [wgm20.github.io/gopro-vbox-sync](https://wgm20.github.io/gopro-vbox-sync/), served from `main`'s `/docs` directory by GitHub Pages. It links to the versioned GitHub release asset. Forks may enable Pages with the same branch/directory settings and update the repository URLs. GitHub Releases also works without Pages.
 
-Review the allowlist, diff and release assets before pushing. `Examples`, `scratch`, local validation records, local build tools, environments and recordings are excluded. Releases contain no Racelogic libraries, scene artwork or FFmpeg binaries. FFmpeg is downloaded separately by the user.
+Review the allowlist, diff and release assets before pushing. `Examples`, `scratch`, local validation records, local build tools, environments, saved private scene packages and recordings are excluded. Source archives include the app's C# helper source and build script; Windows binaries include its compiled helper and runtime configuration. Releases contain no Racelogic libraries, scene artwork or FFmpeg binaries. FFmpeg is downloaded separately by the user.
 
 Keep third-party licence notices with binaries. Build-script copies of Python, Pillow and PyInstaller notices come from the selected build environment; the retained Tcl/Tk, OpenSSL and mimalloc notices must be checked when updating the runtime. No signing certificate is configured. Do not describe an unsigned build as signed or guarantee that Windows will suppress reputation warnings.

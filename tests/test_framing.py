@@ -102,6 +102,7 @@ class RotationDefaultTests(unittest.TestCase):
             app.busy = False; app.rotations = {}; app.crops = {}
             app.rotation = Mock(); app.log = Mock(); app.load_preview = Mock()
             app.scan = SimpleNamespace(crop_errors={})
+            app.update_run_detail = Mock()
             app.select_video()
             app.rotation.set.assert_called_with('Upright — no rotation')
             app.load_preview.assert_called_with(clip, 0)
@@ -121,11 +122,15 @@ class SoundPreferenceTests(unittest.TestCase):
                 try:
                     app = App(root)
                     self.assertEqual(app.audio_source.get(), expected)
-                    app.set_busy(True); self.assertTrue(app.sound_combo.instate(['disabled']))
-                    app.set_busy(False); self.assertTrue(app.sound_combo.instate(['readonly']))
-                    root.geometry('880x740'); root.update_idletasks()
-                    # The added option fits the minimum window width.
-                    self.assertLess(app.sound_combo.winfo_x()+app.sound_combo.winfo_reqwidth(), 830)
+                    app.set_busy(True)
+                    self.assertTrue(app.options_button.instate(['!disabled']))
+                    self.assertEqual(app.options_menu.entrycget('Sound', 'state'), 'disabled')
+                    app.set_busy(False)
+                    self.assertEqual(app.options_menu.entrycget('Sound', 'state'), 'normal')
+                    root.deiconify(); root.geometry('880x740'); root.update_idletasks()
+                    self.assertLessEqual(app.options_button.winfo_rootx() + app.options_button.winfo_width(),
+                                         root.winfo_rootx() + root.winfo_width())
+                    self.assertGreaterEqual(app.options_button.winfo_rooty(), root.winfo_rooty())
                     app.audio_source.set('GoPro'); app.save_preferences()
                     self.assertEqual(json.loads(settings.read_text())['audio_source'], 'gopro')
                     app.temporary.cleanup()

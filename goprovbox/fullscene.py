@@ -1,5 +1,5 @@
 """Full data scene: artwork, logged channels, lap timing, GPS map and G-ball."""
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from datetime import datetime, timezone, timedelta
 import io
 import math
@@ -12,21 +12,49 @@ from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, 
 from .lapdata import Session
 
 
+def scene_source(text):
+    """Recognize ordinary channels and the editor's two-axis resultant formula.
+
+    The mathematical form is fixed. Scene text is never evaluated as code.
+    """
+    if not text.startswith("maths.eqn{"):
+        return datasource(text)
+    pattern=(r"maths\.eqn\{Sqrt\(\((?P<a>[A-Za-z_][A-Za-z0-9_]{0,63})\*\*2\)\+"
+             r"\((?P<b>[A-Za-z_][A-Za-z0-9_]{0,63})\*\*2\)\);"
+             r"ds:(?P=a)\{(?P<first>[^{};]{1,256})\};ds:(?P=b)\{(?P<second>[^{};]{1,256})\}\}")
+    match=re.fullmatch(pattern,text)
+    if match is None or match['a']==match['b']:
+        raise TelemetryError("Unsupported scene datasource expression")
+    first,second=datasource(match['first']),datasource(match['second'])
+    if ({first[0],second[0]}!={"vbox.lat_acc_smth_mps2","vbox.lng_acc_smth_mps2"}
+            or not math.isclose(first[1],second[1],rel_tol=1e-12,abs_tol=0)):
+        raise TelemetryError("Unsupported scene resultant acceleration sources or scales")
+    return "_resultant_acceleration",abs(first[1])
+
+
 def parse_full_scene(members, name="Scene", digest=""):
-    result=parse_scene(members,name,digest)
+    result=parse_scene(members,name,digest,require_four_channels=False)
     root=scene_xml(members["SCENE.XML"]).find(".//scene")
     config=scene_xml(members["VBOXHD.XML"])
     images={e.get("name"):e.get("path") for e in root.findall("images/image")}
-    def image(name):
-        path=images[name]
+    def asset(path):
         if path not in result.assets:
             im=Image.open(io.BytesIO(members[path]))
             if im.format!="PNG" or im.width*im.height>16_000_000:
                 raise TelemetryError("Unsupported scene artwork")
+            if sum(a.width*a.height for a in result.assets.values())+im.width*im.height>32_000_000:
+                raise TelemetryError("Decoded scene artwork exceeds the size limit")
             result.assets[path]=im.convert("RGBA")
         return result.assets[path]
+    def image(name):
+        return asset(images[name])
+    def source(element,field="datasource"):
+        try:
+            return scene_source(element.get(field,""))
+        except (TelemetryError,ValueError) as exc:
+            raise TelemetryError(f"Unsupported scene datasource expression in {element.get('name',element.tag)}") from exc
+    needles={e.get("name"):e for e in root.findall("needles/needle")}
     graphics={e.get("name"):e for e in root.find("graphics")}
-    four={e.get("name"):e for e in result.elements if e.get("name")}
     elements=[];omitted=[]
     try:
         for item in sorted(root.findall("layouts/layout/graphic"),key=lambda e:int(e.get("zorder",0))):
@@ -40,19 +68,65 @@ def parse_full_scene(members, name="Scene", digest=""):
                 box=numbers(e.get("offset"));font=result.fonts[e.get("font")]
                 fmt=e.get("fmtstr","%d");fmtfn=e.get("fmtfn","")
                 if len(box)!=4 or min(box[2:])<=0 or max(box[2:])>8192:raise TelemetryError("Invalid scene text box")
-                if fmtfn not in ("valid_time_ms","time_hm") and not re.fullmatch(r"%[+ 0]?\d{0,2}(?:\.\d{1,2})?(?:l|ll|h)?[diuf]",fmt):
+                if fmtfn not in ("valid_time_ms","time_hm","time_hms") and not re.fullmatch(r"%[+ 0]?\d{0,2}(?:\.\d{1,2})?(?:l|ll|h)?[diuf]",fmt):
                     raise TelemetryError(f"Unsupported number format in {name_}")
                 element={"kind":"text","font":font,"size":(int(box[2]),int(box[3])),"box":box,
                          "fmt":re.sub(r"[lh]","",fmt).replace("u","d"),"fmtfn":fmtfn,
-                         "source":datasource(e.get("datasource","")),"justification":e.get("justification","middle_right")}
-            elif e.tag=="multibar" and name_ in four:
-                element=dict(four[name_]);element["source"]=datasource(e.get("datasource",""))
+                         "source":source(e),"justification":e.get("justification","middle_right")}
+            elif e.tag=="multibar":
+                background=image(e.get("background"));bars=[]
+                for bar in e.findall("graphics_bar"):
+                    limits=numbers(bar.get("range"));size=numbers(bar.get("size"));offset=numbers(bar.get("offset"))
+                    colour=numbers(bar.get("colour"));mode=bar.get("barmode")
+                    if (len(limits)!=2 or limits[1]<=limits[0] or len(size)!=2 or not all(0<v<=8192 for v in size)
+                            or len(offset)!=2 or any(abs(v)>16384 for v in offset)
+                            or len(colour)!=4 or any(v<0 or v>255 for v in colour)
+                            or mode not in ("bottom_top_min","left_right_min","left_right_max")):
+                        raise TelemetryError("Unsupported scene bar geometry")
+                    bars.append((*limits,*map(int,size),*map(int,offset),tuple(int(v) for v in colour[1:]+colour[:1]),mode))
+                if not bars or len(bars)>64:
+                    raise TelemetryError("Scene bar requires a bounded set of ranges")
+                element={"kind":"bar","image":background,"size":background.size,"bars":bars,"source":source(e)}
+            elif e.tag=="dialgauge":
+                background=image(e.get("background"))
+                limits=numbers(e.get("range"));arc=numbers(e.get("arc"));pivot=numbers(e.get("rotate_point"))
+                direction=e.get("rotation","clockwise")
+                if (len(limits)!=2 or limits[1]<=limits[0] or len(arc)!=2 or len(pivot)!=2
+                        or any(abs(v)>360 for v in arc) or direction not in ("clockwise","anticlockwise")
+                        or float(e.get("number_of_rotations","1"))!=1
+                        or not all(0<=v<=limit for v,limit in zip(pivot,background.size))):
+                    raise TelemetryError("Unsupported dial gauge geometry")
+                sweep=(arc[1]-arc[0])%360 if direction=="clockwise" else -((arc[0]-arc[1])%360)
+                if abs(sweep)<1e-9 and abs(arc[1]-arc[0])>=360-1e-9:
+                    sweep=360 if direction=="clockwise" else -360
+                if abs(sweep)<1e-9:
+                    raise TelemetryError("Invalid dial gauge arc")
+                needle=needles[e.get("needle")]
+                pattern=r"\(\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\)"
+                triples=re.findall(pattern,needle.text or "")
+                if (not triples or len(triples)>361
+                        or re.sub(pattern,"",needle.text or "").strip(" \t\r\n,")):
+                    raise TelemetryError("Invalid dial needle frames")
+                frames={}
+                for angle,x,y in triples:
+                    angle,x,y=int(angle),int(x),int(y)
+                    normal=(angle+180)%360-180
+                    if abs(angle)>180 or normal in frames or max(abs(x),abs(y))>16384:
+                        raise TelemetryError("Invalid dial needle frames")
+                    frame=asset(needle.get("images","").rstrip("/")+f"/{angle}.png")
+                    if (pivot[0]+x<0 or pivot[1]+y<0 or pivot[0]+x+frame.width>background.width
+                            or pivot[1]+y+frame.height>background.height):
+                        raise TelemetryError("Dial needle extends outside its gauge")
+                    frames[normal]=(frame,(x,y))
+                element={"kind":"dial","image":background,"size":background.size,"range":limits,
+                         "arc_start":arc[0],"sweep":sweep,"pivot":pivot,"frames":frames,
+                         "source":source(e)}
             elif e.tag=="xyplot":
                 im=image(e.get("background"));marker=image(e.get("foreground"))
                 xr=numbers(e.get("x_range"));yr=numbers(e.get("y_range"))
                 if len(xr)!=2 or len(yr)!=2 or xr[1]<=xr[0] or yr[1]<=yr[0]:raise TelemetryError("Invalid G-ball range")
                 element={"kind":"xyplot","image":im,"marker":marker,"size":im.size,"xr":xr,"yr":yr,
-                         "xsource":datasource(e.get("x_datasource","")),"ysource":datasource(e.get("y_datasource",""))}
+                         "xsource":source(e,"x_datasource"),"ysource":source(e,"y_datasource")}
             elif e.tag=="map":
                 size=tuple(int(v) for v in numbers(e.get("reserved_size","(480,480)")))
                 if len(size)!=2 or min(size)<32 or max(size)>2048:raise TelemetryError("Invalid track map size")
@@ -75,6 +149,16 @@ def parse_full_scene(members, name="Scene", digest=""):
         return result
     except (KeyError,AttributeError,TypeError,ValueError,IndexError,OSError) as exc:
         raise TelemetryError(f"Cannot read the full scene: {exc}") from exc
+
+
+def dial_frame(element,value):
+    """Select the scene's own pre-rendered needle, with circular angle rounding."""
+    if value is None:
+        return None
+    low,high=element["range"]
+    fraction=max(0,min(1,(value-low)/(high-low)))
+    angle=element["arc_start"]+element["sweep"]*fraction
+    return min(element["frames"],key=lambda a:(abs((a-angle+180)%360-180),a))
 
 
 def fit_layout(elements, canvas, width, height):
@@ -130,9 +214,10 @@ class FullSceneRenderer(FourChannelRenderer):
         self.timeline=Timeline(matches,scene.bindings)  # required channel/unit and ambiguity checks
         self.matches=matches
         self.sessions={m.vbo.path:Session(m.vbo) for m in matches}
-        supported={"vbox.speed_gnd_mps", "vbox.lat_acc_smth_mps2", "vbox.lng_acc_smth_mps2",
+        supported={"vbox.speed_gnd_mps", "vbox.sats_used", "vbox.lat_acc_smth_mps2", "vbox.lng_acc_smth_mps2", "_resultant_acceleration",
                    "oled.plt_delta_t_ms", "laptiming.lap_time_ms", "lapresults.lap.session_best.lap_time_ms",
                    "lapresults.lap.previous.lap_time_ms", "lapresults.lap.previous.lap_number",
+                   "laptiming.lap_number", "lapresults.lap.best.lap_time_ms",
                    "vbox.local_ms", "system.day", "system.month", "system.year"}
         for element in scene.elements:
             for field in ("source", "xsource", "ysource"):
@@ -145,17 +230,21 @@ class FullSceneRenderer(FourChannelRenderer):
                             raise TelemetryError(f"{session.vbo.path.name}: scene channel {can[1]} is missing")
                 elif source not in supported:
                     raise TelemetryError(f"Unsupported scene data source in {element['name']}: {source}")
+                elif source=="vbox.sats_used":
+                    for session in self.sessions.values():
+                        if "sats" not in session.indices:
+                            raise TelemetryError(f"{session.vbo.path.name}: scene channel sats is missing")
         self.size=(width,height);self.position=(0,0)
         self.elements,self.scale=fit_layout(scene.elements,scene.size,width,height)
         self.blank=Image.new("RGBA",self.size)
         self.static=self.blank.copy()
-        self.map_cache={};self.text_cache={}
+        self.map_cache={};self.text_cache={};self.needle_cache={}
         for e in self.elements:
             if e.get("image") is not None:
                 e["image"]=e["image"].resize(e["size"],Image.Resampling.LANCZOS)
             if e.get("marker") is not None:
                 e["marker"]=e["marker"].resize(tuple(max(3,round(v*self.scale)) for v in e["marker"].size),Image.Resampling.LANCZOS)
-            if e["kind"] in ("image","bar","xyplot"):
+            if e["kind"] in ("image","bar","xyplot","dial"):
                 self.static.alpha_composite(e["image"],e["pos"])
         self.notes=list(scene.options["notes"])
         for session in self.sessions.values():
@@ -175,13 +264,19 @@ class FullSceneRenderer(FourChannelRenderer):
         can=re.fullmatch(r"can\.bin\[\d+\]\.channel\(([^)]+)\)",key)
         if can:value=row.get(can[1].lower())
         elif key=="vbox.speed_gnd_mps":value=row.get("velocity",0)/3.6
+        elif key=="vbox.sats_used":value=row.get("sats")
         elif key=="vbox.lat_acc_smth_mps2":value=session.acceleration(utc,True)
         elif key=="vbox.lng_acc_smth_mps2":value=session.acceleration(utc)
+        elif key=="_resultant_acceleration":
+            lateral,longitudinal=session.acceleration(utc,True),session.acceleration(utc)
+            value=math.hypot(lateral,longitudinal) if lateral is not None and longitudinal is not None else None
         elif key=="oled.plt_delta_t_ms":value=lap["delta"]*1000 if lap["delta"] is not None else None
-        elif key in ("laptiming.lap_time_ms","lapresults.lap.session_best.lap_time_ms","lapresults.lap.previous.lap_time_ms"):
-            field={"laptiming.lap_time_ms":"lap_time","lapresults.lap.session_best.lap_time_ms":"best_lap","lapresults.lap.previous.lap_time_ms":"previous_lap"}[key]
+        elif key in ("laptiming.lap_time_ms","lapresults.lap.session_best.lap_time_ms","lapresults.lap.best.lap_time_ms","lapresults.lap.previous.lap_time_ms"):
+            field={"laptiming.lap_time_ms":"lap_time","lapresults.lap.session_best.lap_time_ms":"best_lap",
+                   "lapresults.lap.best.lap_time_ms":"best_lap","lapresults.lap.previous.lap_time_ms":"previous_lap"}[key]
             value=lap[field]*1000 if lap[field] is not None else None
         elif key=="lapresults.lap.previous.lap_number":value=lap["lap_number"]
+        elif key=="laptiming.lap_number":value=bisect_right(session.crossings,utc) if lap["lap_time"] is not None else None
         elif key=="vbox.local_ms":value=((utc+self.scene.options["utc_offset"])%86400)*1000
         elif key in ("system.day","system.month","system.year"):
             value=getattr(datetime.fromtimestamp(utc,timezone(timedelta(seconds=self.scene.options["utc_offset"]))),key.split(".")[1])
@@ -194,6 +289,9 @@ class FullSceneRenderer(FourChannelRenderer):
             text=f"{cs//6000:02d}:{cs//100%60:02d}.{cs%100:02d}" if cs is not None else "--:--.--"
         elif e["fmtfn"]=="time_hm":
             text=f"{int(value)//3600000%24:02d}:{int(value)//60000%60:02d}" if value is not None else "--:--"
+        elif e["fmtfn"]=="time_hms":
+            cs=max(0,round(value/10)) if value is not None else None
+            text=f"{cs//360000%24:02d}:{cs//6000%60:02d}:{cs//100%60:02d}.{cs%100:02d}" if cs is not None else "--:--:--.--"
         else:text=scene_number(e["fmt"],value)
         cache=self.text_cache.get(e["name"])
         if cache and cache[0]==text:return cache[1]
@@ -230,13 +328,28 @@ class FullSceneRenderer(FourChannelRenderer):
             x,y=e["pos"]
             if e["kind"]=="text":
                 im.alpha_composite(self.text_image(e,self.source_value(e["source"],session,utc,row,lap)),(x,y))
+            elif e["kind"]=="dial":
+                angle=dial_frame(e,self.source_value(e["source"],session,utc,row,lap))
+                if angle is None:continue
+                cache=self.needle_cache.get(e["name"])
+                if cache is None or cache[0]!=angle:
+                    needle,offset=e["frames"][angle]
+                    needle=needle.resize(tuple(max(1,round(v*self.scale)) for v in needle.size),Image.Resampling.LANCZOS)
+                    offset=tuple(round((p+v)*self.scale) for p,v in zip(e["pivot"],offset))
+                    cache=(angle,needle,offset);self.needle_cache[e["name"]]=cache
+                im.alpha_composite(cache[1],(x+cache[2][0],y+cache[2][1]))
             elif e["kind"]=="bar":
                 value=self.source_value(e["source"],session,utc,row,lap)
                 if value is None:continue
                 for lo,hi,w,h,bx,by,colour,mode in e["bars"]:
                     w,h,bx,by=(round(v*self.scale) for v in (w,h,bx,by))
-                    fill=round((h if mode=="bottom_top_min" else w)*max(0,min(1,(value-lo)/(hi-lo))))
-                    if fill:draw.rectangle((x+bx,y+by+h-fill,x+bx+w-1,y+by+h-1) if mode=="bottom_top_min" else (x+bx,y+by,x+bx+fill-1,y+by+h-1),fill=colour)
+                    fraction=(hi-value)/(hi-lo) if mode=="left_right_max" else (value-lo)/(hi-lo)
+                    fill=round((h if mode=="bottom_top_min" else w)*max(0,min(1,fraction)))
+                    if not fill:continue
+                    if mode=="bottom_top_min":box=(x+bx,y+by+h-fill,x+bx+w-1,y+by+h-1)
+                    elif mode=="left_right_max":box=(x+bx+w-fill,y+by,x+bx+w-1,y+by+h-1)
+                    else:box=(x+bx,y+by,x+bx+fill-1,y+by+h-1)
+                    draw.rectangle(box,fill=colour)
             elif e["kind"]=="xyplot":
                 vx=self.source_value(e["xsource"],session,utc,row,lap);vy=self.source_value(e["ysource"],session,utc,row,lap)
                 if vx is None or vy is None:continue

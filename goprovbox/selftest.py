@@ -11,27 +11,68 @@ from .distribution import asset, uninstall_command
 from .engine import scan_folder, export
 from .reports import export_report_path
 from .media import probe, run, executable
-from .vbo import read_vbo
+from .vbo import read_vbo, write_vbo
 
 
-def run_self_test(destination: Path):
+def run_self_test(destination: Path, *, scene_path: Path | None = None):
     destination.mkdir(parents=True, exist_ok=False)
     root = tk.Tk(); root.withdraw()
     icon = tk.PhotoImage(file=str(asset("icon.png")))
     root.iconphoto(True, icon); root.update(); root.destroy()
     source = destination / "Practice recordings"
     shutil.copytree(asset("demo"), source)
+    card = destination / "SD card"
+    dcim = card / "DCIM" / "100GOPRO"
+    dcim.mkdir(parents=True)
+    for path in source.glob("*.MP4"):
+        path.rename(dcim / path.name)
+    if scene_path is not None:
+        # This is a copied synthetic practice fixture, never a user's VBO.
+        # The saved test scene also displays a CAN acceleration channel.
+        practice = read_vbo(source / "VBOX0001.vbo")
+        practice.columns.append("acceleration")
+        practice.preamble.insert(practice.preamble.index("[channel units]") - 1, "Acceleration")
+        practice.preamble.insert(practice.preamble.index("[comments]") - 1, "g")
+        practice.preamble[practice.preamble.index("[column names]") + 1] += " Acceleration"
+        for row in practice.rows:
+            row.values.append("0")
+        write_vbo(practice, practice.rows,
+                  [float(row.values[practice.index("avitime")]) / 1000 for row in practice.rows],
+                  "VBOX0001_", practice.path,
+                  [int(row.values[practice.index("avifileindex")]) for row in practice.rows])
     # Synthetic original-recorder video supplies a different display shape so
     # the frozen-app check exercises cropping and replacement of GoPro sound.
     run([executable("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", "color=black:s=640x320:r=30",
          "-f", "lavfi", "-i", "aevalsrc=sin(2*PI*(200*t+20*t*t)):s=48000",
          "-t", "24", "-c:v", "libx264", "-c:a", "alac", str(source / "VBOX0001_0001.mp4")])
-    scan = scan_folder(source)
+    scan = scan_folder(source, gopro_folder=card, recursive_gopro=True)
     assert not scan.errors, scan.errors
     assert len(scan.matches) == len(scan.videos) == 2
+    assert all(v.path.parent == dcim for v in scan.videos)
+    assert all(scan.source_path(v.path.name) == v.path for v in scan.videos)
     assert all(v.orientation.clockwise == 0 for v in scan.videos)
     assert [len(m.rows) for m in scan.matches] == [100, 101]
     chosen = scan.videos[0].path.name
+    from .gui import App
+    root = tk.Tk(); root.withdraw()
+    app = App(root, source, gopro_folder=card)
+    assert app.options_menu.type("Include GoPro subfolders") == "checkbutton"
+    assert app.recursive_gopro.get()
+    assert not hasattr(app, "quality_combo")
+    app.scan = scan; app.included_videos = {chosen}
+    app.time_basis.set("UTC")
+    assert app.tree.set("0", "date") == "2026-01-01"
+    assert app.tree.set("0", "start") == "12:00:00"
+    assert app.tree.set("0", "lap") == "—"  # The practice data has no start line.
+    assert app.tree.heading("lap", "text") == "Best in file"
+    assert not app.tree.item("0", "image")
+    assert app.tree.get_children()[0] == "0"
+    app.sort_rows("start", True)
+    assert app.tree.get_children()[0] == "1"
+    assert app.included_videos == {chosen}
+    for callback in root.tk.call("after", "info"):
+        root.after_cancel(callback)
+    root.destroy(); app.temporary.cleanup()
     custom = {"mode": "custom", "x": .5, "y": .75}
     # Exercise the packaged app at the reported long-path boundary, including
     # WAV preparation, muxing, logs, previews and the final folder rename.
@@ -41,7 +82,8 @@ def run_self_test(destination: Path):
     legacy_audio = output_parent / ("." + output.name + ".working-12345678") / "GoPro_GX01D001_0001.audio.wav"
     assert len(str(legacy_audio)) >= 260
     result = export(scan, output, include_videos={chosen},
-                    encoder="software", telemetry_overlay=True, crops={chosen: custom})
+                    encoder="software", telemetry_overlay=True, crops={chosen: custom},
+                    overlay_scene=scene_path, overlay_mode="full" if scene_path else "four")
     for path in result.iterdir():
         assert len(str(path)) < 260, path.name
         with path.open("rb") as handle:
@@ -76,7 +118,8 @@ def run_self_test(destination: Path):
         assert correlation > .98, (point, correlation)
     from .framing import CropEditor, prepare_preview
     prepared = prepare_preview(scan.videos[0], [m for m in scan.matches if m.video.path.name == chosen],
-                               0, 1920, scan.crop_references[chosen].aspect, "four", "",
+                               0, 1920, scan.crop_references[chosen].aspect,
+                               "full" if scene_path else "four", str(scene_path) if scene_path else "",
                                destination / "framing.png", Event())
     root = tk.Tk(); root.withdraw()
     applied = []
@@ -93,8 +136,12 @@ def run_self_test(destination: Path):
               "uninstaller_available": uninstall_command() is not None,
               "passed": True, "matched_videos": 2, "exported_videos": 1, "export_folder": str(result),
               "report_file": str(export_report_path(result)),
-              "checks": ["Tk and packaged icon", "GPS timing", "upright metadata", "partial overlaps",
-                         "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor", "four-channel overlay", "encoded video and VBO verification",
+              "checks": ["Tk and packaged icon", "recording date/time/per-file best-lap selection table",
+                         "separate GoPro SD card with nested DCIM folder", "GPS timing", "upright metadata", "partial overlaps",
+                         "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor",
+                         ("full saved scene overlay" if scene_path.suffix.lower() == ".gvscene"
+                          else "full VVHSN scene import and overlay") if scene_path else "four-channel overlay",
+                         "encoded video and VBO verification",
                          "VBOX sound and decoded alignment at both ends", "long output folder with short temporary paths",
                          "MP4 and VBO only in output; report stored separately", "offline help"],
               "limits": "Does not test Circuit Tools acceptance or a fresh Windows machine."}

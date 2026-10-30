@@ -27,6 +27,7 @@ from .crop import Choice, Reference, rectangle, reference_for, validate_choice
 from .trimming import video_parts
 from .sound import plan_audio, render_audio, attach_audio
 from .reports import archive_details, export_report_path
+from .runinfo import collect_run_info
 
 CT_COMPATIBILITY_NOTE = ("Extended testing encountered a Circuit Tools 3 VBO authenticity/checksum error, followed by the application closing. "
                          "Video playback, rotation and seeking were successful, but this intermittent VBO rejection remains unresolved.")
@@ -62,9 +63,19 @@ class Scan:
     fingerprints: dict[str, dict]
     crop_references: dict[str, Reference] = field(default_factory=dict)
     crop_errors: dict[str, str] = field(default_factory=dict)
+    gopro_folder: Path | None = None
+    recursive_gopro: bool = False
+    source_paths: dict[str, str] = field(default_factory=dict)
+    run_info: dict[str, dict] = field(default_factory=dict)
+
+    def source_path(self, name: str) -> Path:
+        """Keep old scans usable while tracking recordings on other drives."""
+        return Path(self.source_paths[name]) if name in self.source_paths else self.folder / name
 
     def summary(self):
         return {"version": __version__, "source_folder": str(self.folder),
+                "gopro_folder": str(self.gopro_folder or self.folder), "recursive_gopro": self.recursive_gopro,
+                "source_paths": self.source_paths, "run_info": self.run_info,
                 "videos": [v.summary() for v in self.videos],
                 "matches": [m.summary() for m in self.matches],
                 "unmatched_vbo": [v.path.name for v in self.vbos if not any(m.vbo is v for m in self.matches)],
@@ -93,6 +104,8 @@ def select_for_export(scan: Scan, names: set[str]) -> Scan:
     sources = names | {v.path.name for v in vbos}
     return replace(scan, videos=[v for v in scan.videos if v.path.name in names], vbos=vbos,
                    matches=matches, fingerprints={n:f for n,f in scan.fingerprints.items() if n in sources},
+                   source_paths={n:p for n,p in scan.source_paths.items() if n in sources},
+                   run_info={n:info for n,info in scan.run_info.items() if n in {v.path.name for v in vbos}},
                    crop_references={n:r for n,r in scan.crop_references.items() if n in names},
                    crop_errors={n:e for n,e in scan.crop_errors.items() if n in names})
 
@@ -162,13 +175,73 @@ def fingerprint(path: Path) -> dict:
     return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256_sampled": digest.hexdigest()}
 
 
-def scan_folder(folder: Path, log=lambda msg: None, cancel: Event | None = None) -> Scan:
+def _check_sources(scan: Scan, during_export: bool = False):
+    for name, info in scan.fingerprints.items():
+        path = scan.source_path(name)
+        try:
+            current = fingerprint(path)
+        except OSError as exc:
+            raise TelemetryError(f"Cannot read source: {path}. Reconnect its drive or SD card, then scan again.") from exc
+        if current != info:
+            when = "during export" if during_export else "since scan"
+            raise TelemetryError(f"Source changed {when}: {path}; scan again")
+
+
+def _gopro_files(folder: Path, recursive: bool, cancel: Event | None, on_error=lambda path, exc: None):
+    """Walk a card without following directory links or re-reading exports."""
+    pending = [folder]
+    while pending:
+        if cancel and cancel.is_set():
+            raise InterruptedError("Cancelled")
+        current = pending.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError as exc:
+            if current == folder:
+                raise TelemetryError(f"Cannot read GoPro folder: {folder}. Check the drive or SD card is available.") from exc
+            on_error(current, exc)
+            continue
+        children = []
+        for path in entries:
+            if cancel and cancel.is_set():
+                raise InterruptedError("Cancelled")
+            try:
+                if path.is_dir():
+                    # is_junction is not present on Python 3.11. Its reparse tag
+                    # distinguishes junctions from ordinary OneDrive placeholders.
+                    junction = getattr(path.lstat(), "st_reparse_tag", 0) == 0xA0000003
+                    if (recursive and not junction and not path.is_symlink()
+                            and not path.name.casefold().startswith((".gvs-", "gopro circuit tools"))):
+                        children.append(path)
+                elif path.is_file() and path.suffix.casefold() in (".mp4", ".mov"):
+                    yield path
+            except OSError as exc:
+                on_error(path, exc)
+        pending.extend(sorted(children, key=lambda p: str(p).casefold(), reverse=True))
+
+
+def scan_folder(folder: Path, log=lambda msg: None, cancel: Event | None = None, *,
+                gopro_folder: Path | None = None, recursive_gopro: bool = False) -> Scan:
     folder = folder.resolve()
     if not folder.is_dir():
-        raise TelemetryError(f"Folder does not exist: {folder}")
+        raise TelemetryError(f"VBOX folder does not exist: {folder}")
+    gopro_folder = (gopro_folder or folder).resolve()
+    if not gopro_folder.is_dir():
+        raise TelemetryError(f"GoPro folder does not exist: {gopro_folder}")
+    if cancel and cancel.is_set():
+        raise InterruptedError("Cancelled")
     executable("ffmpeg"); executable("ffprobe")
-    files = sorted((p for p in folder.iterdir() if p.is_file()), key=lambda p: p.name.lower())
+    log(f"VBOX runs: {folder}")
+    log(f"GoPro videos: {gopro_folder}" + (" (including subfolders)" if recursive_gopro else ""))
     vbos, videos, ignored, errors, fingerprints = [], [], [], [], {}
+    def discovery_issue(path, exc):
+        message = f"Could not scan {path}: {exc}"
+        errors.append(message)
+        log(message)
+    files = [p for p in folder.iterdir() if p.is_file() and p.suffix.casefold() == ".vbo"]
+    files.extend(_gopro_files(gopro_folder, recursive_gopro, cancel, discovery_issue))
+    files.sort(key=lambda p: str(p).casefold())
+    source_paths, video_names, duplicates = {}, {}, []
     for path in files:
         if cancel and cancel.is_set():
             raise InterruptedError("Cancelled")
@@ -191,22 +264,36 @@ def scan_folder(folder: Path, log=lambda msg: None, cancel: Event | None = None)
                     ignored.append(path.name + " (no GoPro telemetry)")
                     continue
                 video = inspect_video(path, metadata, cancel)
+                previous = video_names.get(path.name.casefold())
+                if previous is not None:
+                    duplicates.append((previous, path))
+                else:
+                    video_names[path.name.casefold()] = path
                 videos.append(video)
                 log(f"  GPS: {utc_text(video.clock.origin)}; rotation: {video.orientation.clockwise}")
             fingerprints[path.name] = fingerprint(path)
+            source_paths[path.name] = str(path)
         except InterruptedError:
             raise
         except (TelemetryError, OSError, KeyError, ValueError) as exc:
             errors.append(f"{path.name}: {exc}")
             log(f"  Could not use {path.name}: {exc}")
+    if duplicates:
+        locations = "\n".join(f"{first}\n{second}" for first, second in duplicates)
+        raise TelemetryError("GoPro videos have duplicate filenames in different folders:\n" + locations +
+                             "\nChoose a narrower GoPro folder, or give these recordings unique filenames before scanning.")
     matches = []
     for video in videos:
         for vbo in vbos:
+            if cancel and cancel.is_set():
+                raise InterruptedError("Cancelled")
             try:
                 matches.extend(intersections(vbo, video))
             except TelemetryError as exc:
                 errors.append(f"{video.path.name} / {vbo.path.name}: {exc}")
-    scan = Scan(folder, videos, vbos, matches, ignored, errors, fingerprints)
+    scan = Scan(folder, videos, vbos, matches, ignored, errors, fingerprints,
+                gopro_folder=gopro_folder, recursive_gopro=recursive_gopro, source_paths=source_paths,
+                run_info=collect_run_info(vbos, log, cancel))
     cache = {}
     for video in videos:
         if cancel and cancel.is_set():
@@ -432,8 +519,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
     if overlap_only:
         default_name += " Matched"
     output = (output or scan.folder / default_name).resolve()
-    source_folder = scan.folder.resolve()
-    if output == source_folder or output in source_folder.parents:
+    source_folders = {scan.folder.resolve(), (scan.gopro_folder or scan.folder).resolve()}
+    source_files = [scan.source_path(name).resolve() for name in scan.fingerprints]
+    if (any(output == source or output in source.parents for source in source_folders)
+            or any(output == source or output in source.parents for source in source_files)):
         raise TelemetryError("Choose a separate output folder, not the source folder or one of its parents")
     if not scan.matches:
         raise TelemetryError("No verified GPS overlap was found. See the scan results for details.")
@@ -449,12 +538,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
     settings = {"version": __version__, "rotations": selected, "max_size": max_size, "encoder": encoder,
                 "included_videos": [v.path.name for v in used], "overlap_only": overlap_only}
     # Check the scan before reading linked media or preparing an overlay.
-    for name, info in scan.fingerprints.items():
-        if fingerprint(scan.folder / name) != info:
-            raise TelemetryError(f"Source changed since scan: {name}; scan again")
+    _check_sources(scan)
     parts = {v.path.name: video_parts(v, scan.matches, overlap_only) for v in used}
     settings["video_ranges"] = {name: [part.summary() for part in clips] for name, clips in parts.items()}
-    audio_plans, sound_sources = {}, {}
+    audio_plans, sound_sources, sound_checks = {}, {}, {}
     settings["audio_source"] = audio_source
     if audio_source == "vbox":
         log("Matching VBOX sound to the GoPro GPS clock")
@@ -474,6 +561,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     if reference and path.name in reference.sources and reference.sources[path.name] != stamp:
                         raise TelemetryError(f"Original VBOX video changed since scan: {path.name}; scan again")
                     sound_sources[path.name] = info
+                    sound_checks[path] = info
                 for note in plan.notes: log(note)
             audio_plans[video.path.name] = plans
         settings["audio"] = {"sources": sound_sources,
@@ -507,11 +595,12 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
             renderers[video.path.name] = Renderer(video, [m for m in scan.matches if m.video is video],
                                                 *dimensions(video, selected[video.path.name], max_size, crop_rectangles.get(video.path.name)), scene)
         settings["overlay"]["notes"] = list(dict.fromkeys(note for renderer in renderers.values() for note in getattr(renderer, "notes", [])))
-    signature = hashlib.sha256(json.dumps({"sources": scan.fingerprints, "settings": settings}, sort_keys=True).encode()).hexdigest()
+    signature_inputs = {"sources": scan.fingerprints, "settings": settings}
+    if scan.source_paths:
+        signature_inputs["source_paths"] = scan.source_paths
+    signature = hashlib.sha256(json.dumps(signature_inputs, sort_keys=True).encode()).hexdigest()
     # Revalidate source metadata before committing to a long encode.
-    for name, info in scan.fingerprints.items():
-        if fingerprint(scan.folder / name) != info:
-            raise TelemetryError(f"Source changed since scan: {name}; scan again")
+    _check_sources(scan)
     if output.exists():
         intact = False
         try:
@@ -635,12 +724,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                         "overlap_seconds": rs[-1].utc - rs[0].utc,
                         "videos": [video_files[idx] for idx in sorted(set(indices))],
                         "telemetry_preserved": True})
-        for name, info in scan.fingerprints.items():
-            if fingerprint(scan.folder / name) != info:
-                raise TelemetryError(f"Source changed during export: {name}")
-        for name, info in sound_sources.items():
-            if fingerprint(scan.folder / name) != info:
-                raise TelemetryError(f"Sound source changed during export: {name}")
+        _check_sources(scan, during_export=True)
+        for path, info in sound_checks.items():
+            if fingerprint(path) != info:
+                raise TelemetryError(f"Sound source changed during export: {path}")
         for setting in crop_settings.values():
             for name, stamp in setting["reference"]["sources"].items():
                 stat = (scan.folder / name).stat()
@@ -768,4 +855,4 @@ img{{width:100%;max-width:480px}}.note{{background:#e2efea;padding:18px;border-r
 exact duplicate samples are removed. Telemetry gaps are split into separate files. UTC dates handle midnight; file modification times are never used for matching.</p>
 <p>Clock residuals describe consistency, not absolute synchronisation accuracy. GPS receiver latency and video exposure may leave a small offset;
 check a distinctive event visually. Source footage remains {e(report['videos'][0]['codec']) if report['videos'] else ''} in the original folder.</p>
-<small>Source: <code>{e(report['source_folder'])}</code><br>Detailed measurements and fingerprints: <a href="report.json">report.json</a></small></main></html>''', encoding="utf-8")
+<small>VBOX source: <code>{e(report['source_folder'])}</code><br>GoPro source: <code>{e(report.get('gopro_folder', report['source_folder']))}</code><br>Detailed measurements and fingerprints: <a href="report.json">report.json</a></small></main></html>''', encoding="utf-8")

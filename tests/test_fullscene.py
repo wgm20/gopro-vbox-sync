@@ -1,6 +1,7 @@
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 import math
 import json
@@ -11,8 +12,8 @@ from goprovbox.reports import export_report_path
 import xml.etree.ElementTree as ET
 
 from goprovbox.lapdata import Session,Projection
-from goprovbox.fullscene import parse_full_scene,fit_layout,MapTransform
-from goprovbox.overlay import Renderer
+from goprovbox.fullscene import parse_full_scene,fit_layout,MapTransform,dial_frame,scene_source
+from goprovbox.overlay import Renderer,parse_scene
 from goprovbox.engine import Match,Scan,export,fingerprint
 from goprovbox.media import run,executable,probe
 from goprovbox.gpmf import TelemetryError
@@ -37,6 +38,30 @@ def complete_scene():
     f=root.find('.//font');f.text+=' ,(0x3a,55),(0x2e,60)';members['font.png']=png((65,12),(255,255,255,255))
     members['SCENE.XML']=ET.tostring(root)
     return parse_full_scene(members)
+
+
+def dial_members(rotation='clockwise',arc='(-60,60)'):
+    """Tiny delivered needle frames make position and range errors visible."""
+    members=scene_members();root=ET.fromstring(members['SCENE.XML'])
+    graphics=root.find('.//graphics');graphics.clear()
+    layout=root.find('.//layout');layout.clear();layout.set('format','(320,180)')
+    ET.SubElement(root.find('.//images'),'image',name='dial',path='dial.png')
+    members['dial.png']=png((40,40),(10,10,10,255))
+    needles=ET.SubElement(root.find('.//scene'),'needles')
+    needle=ET.SubElement(needles,'needle',name='hand',images='needles/hand')
+    needle.text='(-60,-12,0),(0,0,-12),(60,12,0)'
+    for angle,colour in ((-60,(255,0,0,255)),(0,(0,255,0,255)),(60,(0,0,255,255))):
+        members[f'needles/hand/{angle}.png']=png((3,3),colour)
+    ET.SubElement(graphics,'dialgauge',name='speed dial',datasource='vbox.speed_gnd_mps scaling=3.6',
+                  background='dial',range='(0,100)',arc=arc,rotation=rotation,rotate_point='(20,20)',
+                  number_of_rotations='1',needle='hand')
+    ET.SubElement(layout,'graphic',name='speed dial',screen_pos='(20,20)')
+    members['SCENE.XML']=ET.tostring(root)
+    return members
+
+
+def resultant_formula(first='vbox.lat_acc_smth_mps2 scaling=0.1',second='vbox.lng_acc_smth_mps2 scaling=0.1'):
+    return 'maths.eqn{Sqrt((a**2)+(b**2));ds:a{'+first+'};ds:b{'+second+'}}'
 
 
 def circle_vbo(folder):
@@ -129,6 +154,135 @@ class FullSceneTests(ExportTestCase):
         self.assertEqual(set(self.scene.omitted),{'pipborder','Cam2'})
         renderer=Renderer(self.clip,[self.match],320,180,self.scene)
         self.assertEqual(renderer.frame(30).size,(320,180))
+
+    def test_dial_scene_uses_only_referenced_channels_and_interpolates_needle_position(self):
+        members=dial_members();scene=parse_full_scene(members)
+        self.assertEqual(scene.bindings,{})
+        with self.assertRaisesRegex(TelemetryError,'dialgauge widget is not supported'):
+            parse_scene(members)
+        rows=[]
+        for utc,speed in ((BASE,40),(BASE+.1,60)):
+            values=self.vbo.rows[0].values[:12].copy();values[4]=str(speed)
+            rows.append(Row(utc,values))
+        # No RPM, throttle or brake columns exist in this speed-only recording.
+        vbo=replace(self.vbo,columns=self.vbo.columns[:12],rows=rows)
+        renderer=Renderer(self.clip,[replace(self.match,vbo=vbo,rows=rows)],320,180,scene)
+        frame=renderer.frame(.05)
+        self.assertIn((0,255,0,255),{colour for count,colour in frame.getcolors(frame.width*frame.height)})
+        needle=renderer.elements[0]
+        angle,image,offset=renderer.needle_cache['speed dial']
+        self.assertEqual(angle,0)
+        self.assertEqual(offset,tuple(round(v*renderer.scale) for v in (20,8)))
+        self.assertEqual(frame.getpixel((needle['pos'][0]+offset[0]+1,needle['pos'][1]+offset[1]+1)),(0,255,0,255))
+        self.assertIsNone(dial_frame(needle,None))
+        self.assertEqual(dial_frame(needle,-50),-60)
+        self.assertEqual(dial_frame(needle,150),60)
+
+    def test_dial_clockwise_anticlockwise_and_wrapped_arcs(self):
+        clockwise=parse_full_scene(dial_members()).elements[0]
+        anticlockwise=parse_full_scene(dial_members('anticlockwise','(60,-60)')).elements[0]
+        self.assertEqual([dial_frame(clockwise,v) for v in (0,50,100)],[-60,0,60])
+        self.assertEqual([dial_frame(anticlockwise,v) for v in (0,50,100)],[60,0,-60])
+        wrapped=dict(clockwise,arc_start=150,sweep=60,frames={150:None,-180:None,-150:None})
+        self.assertEqual([dial_frame(wrapped,v) for v in (0,50,100)],[150,-180,-150])
+
+    def test_dial_invalid_geometry_missing_frames_and_unbounded_frame_sets_are_rejected(self):
+        for attributes in ({'range':'(1,1)'},{'arc':'(0,0)'},{'number_of_rotations':'2'},
+                           {'rotate_point':'(100,100)'},{'rotation':'sideways'}):
+            members=dial_members();root=ET.fromstring(members['SCENE.XML'])
+            root.find('.//dialgauge').attrib.update(attributes);members['SCENE.XML']=ET.tostring(root)
+            with self.subTest(attributes=attributes),self.assertRaises(TelemetryError):
+                parse_full_scene(members)
+        members=dial_members();del members['needles/hand/0.png']
+        with self.assertRaisesRegex(TelemetryError,'0.png'):
+            parse_full_scene(members)
+        for frames in ('(0,0,-12),(0,0,-12)',','.join('(0,0,0)' for _ in range(362)),
+                       '(0,-200,0)','not frame metadata'):
+            members=dial_members();root=ET.fromstring(members['SCENE.XML'])
+            root.find('.//needle').text=frames;members['SCENE.XML']=ET.tostring(root)
+            with self.subTest(frames=frames[:40]),self.assertRaises(TelemetryError):
+                parse_full_scene(members)
+
+    def test_old_lap_sources_keep_current_previous_and_past_best_distinct(self):
+        renderer=Renderer(self.clip,[self.match],320,180,self.scene)
+        session=next(iter(renderer.sessions.values()))
+        for seconds,current,previous,best in ((0,None,None,None),(10,1,None,None),(30,2,1,20000)):
+            utc=BASE+seconds;lap=session.lap_values(utc)
+            with self.subTest(seconds=seconds):
+                self.assertEqual(renderer.source_value(('laptiming.lap_number',1),session,utc,{},lap),current)
+                self.assertEqual(renderer.source_value(('lapresults.lap.previous.lap_number',1),session,utc,{},lap),previous)
+                value=renderer.source_value(('lapresults.lap.best.lap_time_ms',1),session,utc,{},lap)
+                if best is None:self.assertIsNone(value)
+                else:self.assertAlmostEqual(value,best,places=4)
+
+    def test_generic_bar_reads_recorded_satellites_without_four_channel_requirement(self):
+        members=dial_members();root=ET.fromstring(members['SCENE.XML'])
+        gauge=root.find('.//dialgauge');gauge.tag='multibar';gauge.set('datasource','vbox.sats_used')
+        ET.SubElement(gauge,'graphics_bar',range='(0,24)',size='(10,40)',offset='(0,0)',
+                      colour='(255,255,0,255)',barmode='bottom_top_min')
+        members['SCENE.XML']=ET.tostring(root);scene=parse_full_scene(members)
+        self.assertEqual(scene.bindings,{})
+        renderer=Renderer(self.clip,[self.match],320,180,scene)
+        frame=renderer.frame(30)
+        self.assertIn((255,0,255,255),{colour for count,colour in frame.getcolors(frame.width*frame.height)})
+
+    def test_braking_g_bar_fills_from_right_at_maximum_toward_negative_minimum(self):
+        members=dial_members();root=ET.fromstring(members['SCENE.XML'])
+        gauge=root.find('.//dialgauge');gauge.tag='multibar';gauge.set('datasource','can.bin[0].channel(Acceleration)')
+        ET.SubElement(gauge,'graphics_bar',range='(-1.5,0)',size='(20,10)',offset='(5,5)',
+                      colour='(255,255,0,0)',barmode='left_right_max')
+        members['SCENE.XML']=ET.tostring(root);scene=parse_full_scene(members)
+        self.vbo.columns.append('acceleration')
+        for row in self.vbo.rows:row.values.append('0')
+        for value,left_filled,right_filled in ((1,False,False),(0,False,False),(-.75,False,True),(-1.5,True,True),(-2,True,True)):
+            for row in self.vbo.rows:row.values[-1]=str(value)
+            renderer=Renderer(self.clip,[self.match],320,180,scene)
+            frame=renderer.frame(30);element=renderer.elements[0]
+            bx,by,w,h=(round(v*renderer.scale) for v in (5,5,20,10));x,y=element['pos']
+            with self.subTest(acceleration=value):
+                self.assertEqual(frame.getpixel((x+bx+1,y+by+h//2))==(255,0,0,255),left_filled)
+                self.assertEqual(frame.getpixel((x+bx+w-2,y+by+h//2))==(255,0,0,255),right_filled)
+
+    def test_resultant_formula_uses_only_whitelisted_scaled_recorded_acceleration(self):
+        parsed=scene_source(resultant_formula())
+        self.assertEqual(parsed,('_resultant_acceleration',.1))
+        renderer=Renderer(self.clip,[self.match],320,180,self.scene)
+        known=SimpleNamespace(acceleration=lambda utc,lateral=False:3 if lateral else 4)
+        self.assertAlmostEqual(renderer.source_value(parsed,known,BASE,{},{}),.5)
+        gap=SimpleNamespace(acceleration=lambda utc,lateral=False:None if lateral else 4)
+        self.assertIsNone(renderer.source_value(parsed,gap,BASE,{},{}))
+        # Different declarations, executable text and other formula shapes are not interpreted.
+        for expression in (resultant_formula(second='vbox.speed_gnd_mps scaling=0.1'),
+                           resultant_formula(second='vbox.lng_acc_smth_mps2 scaling=2'),
+                           resultant_formula().replace('Sqrt','__import__'),
+                           resultant_formula().replace('a**2','a**3'),
+                           resultant_formula().replace(';ds:b',';ds:a')):
+            with self.subTest(expression=expression),self.assertRaises(TelemetryError):
+                scene_source(expression)
+
+    def test_resultant_formula_scene_parses_and_propagates_telemetry_gaps(self):
+        members=scene_members();root=ET.fromstring(members['SCENE.XML'])
+        root.find(".//text[@name='speed']").set('datasource',resultant_formula())
+        root.find('.//graphics').remove(root.find(".//text[@name='laps']"))
+        root.find('.//layout').remove(root.find(".//graphic[@name='laps']"))
+        members['SCENE.XML']=ET.tostring(root)
+        scene=parse_full_scene(members)
+        element=next(e for e in scene.elements if e['name']=='speed')
+        self.assertEqual(element['source'],('_resultant_acceleration',.1))
+        renderer=Renderer(self.clip,[self.match],320,180,scene)
+        session=next(iter(renderer.sessions.values()))
+        self.assertIsNotNone(renderer.source_value(element['source'],session,BASE+30,{},{}))
+        session.gaps.append(BASE+30)
+        self.assertIsNone(renderer.source_value(element['source'],session,BASE+30,{},{}))
+
+    def test_scene_clock_time_hms_formats_centiseconds_and_midnight(self):
+        renderer=Renderer(self.clip,[self.match],320,180,self.scene)
+        element=next(e for e in renderer.elements if e['name']=='rpm')
+        element=dict(element,fmtfn='time_hms',size=(200,20))
+        for value,expected in ((3723450,'01:02:03.45'),(86399999,'00:00:00.00'),(None,'--:--:--.--')):
+            with self.subTest(value=value):
+                renderer.text_image(element,value)
+                self.assertEqual(renderer.text_cache[element['name']][0],expected)
 
     def test_integer_readouts_round_like_recorder_without_changing_timeline(self):
         renderer=Renderer(self.clip,[self.match],320,180,self.scene)
