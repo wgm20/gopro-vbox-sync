@@ -38,7 +38,7 @@ def correlation(a, b):
 
 class SoundTests(ExportTestCase):
     def setUp(self):
-        temp = TemporaryDirectory(); self.addCleanup(temp.cleanup); self.folder = Path(temp.name)
+        temp = TemporaryDirectory(); self.addCleanup(temp.cleanup); self.folder = Path(temp.name).resolve()
         self.gopro = self.folder/'GX010001.mp4'
         self.recording(self.gopro, 8, 'sin(2*PI*900*t)')
         self.clip = replace(video(self.gopro, duration=8), width=160, height=160)

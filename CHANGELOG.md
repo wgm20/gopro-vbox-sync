@@ -1,8 +1,11 @@
 # Release notes
 
-## 1.6.0b11 — released 2026-10-30
+## 1.6.0b12 — released 2026-10-30
 
-This release includes the development milestones below since the public 1.6.0b4 release.
+- Publishes the improvements since 1.6.0b4: separate GoPro/SD-card sources, recording dates and per-file lap times, red-star lap markers, the **Options** menu, new supported `.VVHSN` imports and reusable `.gvscene` packages. The development milestones below describe these changes.
+- Corrects two Windows test fixtures that compared short (8.3) paths with canonical paths. Production path handling already uses canonical paths; this change fixes release validation without changing app behaviour.
+
+## 1.6.0b11 — development milestone included in 1.6.0b12
 
 - Moves **Resolution**, **Overlay**, **Sound**, **Only export video with VBOX data** and **Include GoPro subfolders** into **Options** beside **Help**. The same menu contains **Details…** and **What do red stars mean?**, keeping the main window focused on choosing, previewing and creating videos.
 - Starts **Include GoPro subfolders** ticked for desktop users, including those with an older saved preference that disabled it, and remembers new choices. Removes the folder-reset helper text from the main window.

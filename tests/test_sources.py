@@ -19,7 +19,7 @@ class SourceTests(ExportTestCase):
     def setUp(self):
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.vbox = self.root / "VBOX runs"
         self.card = self.root / "SD card"
         self.vbox.mkdir(); self.card.mkdir()
