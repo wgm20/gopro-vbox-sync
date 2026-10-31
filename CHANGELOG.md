@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.6.0b14 — released 2026-10-31
+
+- Fixes a selection mismatch where toggling **Include** could leave another file in the preview. Clicking its checkbox or pressing Space now selects, focuses and previews the file whose inclusion changes.
+- Shows the filename and **Included** or **Not included** status in the main preview. The framing editor names the file being edited and uses **Apply to this video** to clarify that framing belongs to that file.
+- Asks **Export without the saved crop?**, with **No** selected by default, when enabled crops exist only on files excluded from export. This lets users review their selection; it does not include a file automatically or copy its crop to another file.
+- Retains the 1.6.0b13 source-folder, lap-selection, Options and scene-import features below.
+
 ## 1.6.0b13 — released 2026-10-30
 
 - Publishes the improvements since 1.6.0b4: separate GoPro/SD-card sources, recording dates and per-file lap times, red-star lap markers, the **Options** menu, new supported `.VVHSN` imports and reusable `.gvscene` packages. The development milestones below describe these changes.

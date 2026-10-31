@@ -111,6 +111,7 @@ class App:
         if self.time_basis.get() not in TIME_BASES:
             self.time_basis.set("Local time")
         self.run_detail = tk.StringVar()
+        self.preview_title = tk.StringVar(value="Select a video to preview")
         self.status = tk.StringVar(value="Choose both folders above, then click Scan for matches.")
         self.summary = tk.StringVar(value="")
         root.title(f"GoPro VBOX Sync {__version__}")
@@ -203,6 +204,9 @@ class App:
         self.tree.bind("<space>", self.toggle_focused_include)
         self.log_messages = []
         preview_controls = ttk.Frame(right); preview_controls.pack(side="bottom", fill="x")
+        self.preview_heading = ttk.Label(right, textvariable=self.preview_title, font=("Segoe UI", 10, "bold"),
+                                         wraplength=360, justify="left")
+        self.preview_heading.pack(fill="x", pady=(0,6))
         self.preview_label = ttk.Label(right, text="Preview", anchor="center", background="#dce3e9")
         self.preview_label.pack(fill="both", expand=True)
         self.preview_label.bind("<Configure>", self.resize_preview)
@@ -427,7 +431,12 @@ class App:
         video = self.selected_video()
         if video is None:
             self.run_detail.set("")
+            self.preview_title.set("Select a video to preview")
+            self.preview_heading.configure(foreground="#203047")
             return
+        included = video.path.name in self.included_videos
+        self.preview_title.set(video.path.name + (" · Included" if included else " · Not included"))
+        self.preview_heading.configure(foreground="#203047" if included else "#9f3b00")
         info = video_run_info(self.scan, video)
         best = info["fastest_lap"]
         description = (f"Best in file {lap_time(best['duration_seconds'])} · {info['fastest_run']}"
@@ -470,8 +479,11 @@ class App:
     def source_changed(self, *_):
         if self.busy:
             return
+        if any(choice != "none" for choice in self.crops.values()):
+            self.log("Recording sources or scan options changed; saved framing was cleared.")
         self.scan = None; self.result = None
         self.selection_data.clear(); self.run_detail.set("")
+        self.preview_title.set("Select a video to preview"); self.preview_heading.configure(foreground="#203047")
         self.included_videos.clear(); self.tree.delete(*self.tree.get_children()); self.summary.set("")
         self.rotations.clear(); self.crops.clear(); self.crop_note.set("")
         self.preview_generation += 1
@@ -504,15 +516,22 @@ class App:
         self.tree.set(row, "include", "☑" if name in self.included_videos else "☐")
         if self.sort_column == "include":
             self.sort_rows("include", self.sort_reverse)
-        self.update_selection_summary(); self.quality_changed(); self.set_busy(False)
+        self.update_selection_summary(); self.update_run_detail(); self.quality_changed(); self.set_busy(False)
 
     def click_include(self, event):
         if self.tree.identify_region(event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#1":
-            self.toggle_include(self.tree.identify_row(event.y))
+            if not self.busy and self.scan is not None:
+                row = self.tree.identify_row(event.y)
+                if row:
+                    self.tree.selection_set(row); self.tree.focus(row); self.tree.focus_set()
+                    self.toggle_include(row)
             return "break"
 
     def toggle_focused_include(self, event=None):
-        self.toggle_include(self.tree.focus())
+        row = self.tree.focus()
+        if row and not self.busy and self.scan is not None:
+            self.tree.selection_set(row)
+            self.toggle_include(row)
         return "break"
 
     def output_name(self):
@@ -645,10 +664,13 @@ class App:
         if not gopro_folder.is_dir():
             messagebox.showerror("Choose GoPro videos", "Choose the SD card or folder with your GoPro videos."); return
         recursive_gopro = self.recursive_gopro.get()
+        if any(choice != "none" for choice in self.crops.values()):
+            self.log("Starting a new scan; saved framing was cleared. Set framing again after scanning.")
         self.result = None; self.rotations = {}; self.crops = {}; self.progress["value"] = 0
         self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
         self.selection_data.clear(); self.run_detail.set("")
+        self.preview_title.set("Select a video to preview"); self.preview_heading.configure(foreground="#203047")
         self.preview_generation += 1; self.preview_label.configure(image="", text="Preview")
         self.preview_source = None; self.preview_display_size = None
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
@@ -731,6 +753,16 @@ class App:
         rotations = {v.path.name: self.rotations.get(v.path.name, 0) for v in scan.videos}
         size = QUALITY[self.quality.get()]
         crops = deepcopy(self.crops)
+        cropped_files = {name for name, choice in crops.items() if choice != "none"}
+        if cropped_files and not cropped_files.intersection(included):
+            def file_names(names):
+                ordered = sorted(names, key=str.casefold)
+                return ", ".join(ordered[:3]) + (f" and {len(ordered) - 3} more" if len(ordered) > 3 else "")
+            if not messagebox.askyesno("Export without the saved crop?",
+                f"Framing is saved for {file_names(cropped_files)}, but those files are not included.\n\n"
+                f"The included files ({file_names(included)}) have no crop applied.\n\n"
+                "Export them without cropping?", default=messagebox.NO, parent=self.root):
+                return
         overlap_only = self.overlap_only.get()
         audio_source = SOUND[self.audio_source.get()]
         mode = OVERLAYS[self.overlay_mode.get()]
@@ -738,6 +770,8 @@ class App:
         scene = Path(self.scene_path.get().strip()) if overlay_enabled and self.scene_path.get().strip() else None
         if mode == "full" and scene is None:
             messagebox.showerror("Choose a scene", "Choose a VBOX scene for the full overlay."); return
+        for name in sorted(included, key=str.casefold):
+            self.log(f"{name}: export framing — " + ("no crop" if crops.get(name, "none") == "none" else "crop enabled"))
         self.status.set("Preparing video and data…")
         self.progress["value"] = 0
         self.worker(lambda: self.events.put(("complete", export(scan, output, rotations=rotations, max_size=size,
@@ -760,7 +794,10 @@ class App:
                     if not self.closing and not self.cancel.is_set() and self.scan is scan:
                         from .framing import CropEditor
                         def apply(choice, video=prepared.video, rotation=prepared.rotation):
-                            self.crops[video.path.name] = choice
+                            self.crops[video.path.name] = deepcopy(choice)
+                            crop_state = "no crop" if choice == "none" else "crop enabled"
+                            included = "included" if video.path.name in self.included_videos else "not included"
+                            self.log(f"{video.path.name}: framing applied — {crop_state}; {included}.")
                             self.quality_changed()
                             self.load_preview(video, rotation)
                         CropEditor(self.root, prepared, choice, apply,

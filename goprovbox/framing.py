@@ -89,6 +89,9 @@ class CropEditor(tk.Toplevel):
         self.input_size = None
         self.input_box = None
         body = ttk.Frame(self, padding=18); body.pack(fill="both", expand=True)
+        self.scope_label = ttk.Label(body, text=prepared.video.path.name + " · Framing applies to this video",
+                                     font=("Segoe UI", 11, "bold"), wraplength=1050)
+        self.scope_label.pack(anchor="w", pady=(0,10))
         toolbar = ttk.Frame(body); toolbar.pack(fill="x", pady=(0, 12))
         label = f"Crop to VBOX {prepared.aspect.numerator}:{prepared.aspect.denominator}" if prepared.aspect else "Crop to VBOX shape"
         self.crop_toggle = ttk.Checkbutton(toolbar, text=label, variable=self.enabled, command=self.redraw)
@@ -121,7 +124,7 @@ class CropEditor(tk.Toplevel):
         self.unavailable = unavailable or "Keep the original VBOX video beside the VBOX runs to enable cropping."
         actions = ttk.Frame(body); actions.pack(fill="x")
         ttk.Button(actions, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(actions, text="Apply", style="Accent.TButton", command=self.commit).pack(side="right", padx=(0, 8))
+        ttk.Button(actions, text="Apply to this video", style="Accent.TButton", command=self.commit).pack(side="right", padx=(0, 8))
         self.bind("<Escape>", lambda e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.grab_set()

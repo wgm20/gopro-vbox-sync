@@ -57,7 +57,7 @@ class SelectionTests(ExportTestCase):
         app.rotations = {}; app.crops = {'GX010002.mp4': 'top'}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
         app.overlap_only = Mock(); app.overlap_only.get.return_value = True
         app.audio_source = Mock(); app.audio_source.get.return_value = 'VBOX (GoPro for gaps)'
-        app.events = queue.Queue(); app.worker = Mock()
+        app.events = queue.Queue(); app.worker = Mock(); app.log = Mock()
         app.selected_video = Mock(return_value=self.clips[0])
         App.begin_export(app)
         job = app.worker.call_args.args[0]

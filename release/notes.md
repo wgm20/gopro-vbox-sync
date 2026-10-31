@@ -1,6 +1,14 @@
-# GoPro VBOX Sync 1.6.0b13 — 30 October 2026
+# GoPro VBOX Sync 1.6.0b14 — 31 October 2026
 
-Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. This release includes all changes since the public 1.6.0b4 download.
+Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. This release makes it clearer which file you are framing and which files will be exported.
+
+- Clicking **Include** or pressing Space now selects and previews the file whose inclusion you toggle. This avoids leaving a different file in the preview.
+- The main preview shows the filename and **Included** or **Not included** status. The framing editor names the file being edited and uses **Apply to this video** to make the per-file scope clear. Framing a file does not include it automatically or apply its crop to another file.
+- If enabled crops exist only on excluded files, **Create files** asks **Export without the saved crop?** and defaults to **No**, allowing you to review the selection before continuing.
+
+## Included from 1.6.0b13 — 30 October 2026
+
+The features introduced since the public 1.6.0b4 release remain available:
 
 - **Separate recording folders.** Choose **VBOX runs**, then point **GoPro videos** at an SD card, its DCIM folder or any other location. No copying is needed. GoPro videos uses the VBOX folder until you set a separate path, which the app remembers. Clearing it restores the VBOX folder. Subfolders are included by default; **Options → Include GoPro subfolders** remembers your choice. Source recordings stay unchanged, conflicting GoPro filenames are reported, and exports default to a new folder under VBOX runs. Command-line scans also support `--gopro-folder`, `--gopro-recursive` and `--no-gopro-recursive`.
 - **Choose footage before conversion.** GPS-based **Date** and **Start**, local/UTC display and sortable columns help compare recordings. **Best in file** is the fastest complete VBOX lap wholly within that GoPro file's GPS time range; split laps are excluded and **—** means none. A separate red star (**★**) marks footage of the whole-run fastest lap. Both files are marked if it crosses a chapter boundary, independently of their per-file best times. **Options → Details…** shows the whole-run best and explains coverage or missing times.
@@ -10,7 +18,7 @@ Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. 
 
 Lap times are reconstructed from VBOX data using the overlay's timing method and may differ from the recorder. Incomplete laps and laps crossing data gaps are excluded. Scene rendering covers a tested subset; inspect the preview before exporting.
 
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b13-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b14-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved, and the exported MP4 also plays in ordinary video players.
 
