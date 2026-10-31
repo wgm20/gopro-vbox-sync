@@ -136,7 +136,7 @@ class SourcePickerTests(unittest.TestCase):
                                        "★ This clip has fastest-lap footage")
                 self.root.update_idletasks()
                 controls = (app.source_entry, app.browse, app.gopro_entry, app.gopro_browse,
-                            app.scan_button, app.preview_label,
+                            app.scan_button, app.export_video_combo, app.preview_heading, app.preview_label,
                             app.overlay_preview, app.create, app.open_result)
                 if full_scene:
                     controls += (app.scene_entry, app.scene_button)

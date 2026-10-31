@@ -94,22 +94,33 @@ class FramingInteractionTests(unittest.TestCase):
 
 class RotationDefaultTests(unittest.TestCase):
     def test_selecting_video_ignores_detected_rotation_until_manually_changed(self):
-        clip = video(Path('GX010001.mp4'))
-        for detected in (90, 180, 270, None):
-            clip.orientation = replace(clip.orientation, clockwise=detected)
-            app = App.__new__(App)
-            app.selected_video = Mock(return_value=clip)
-            app.busy = False; app.rotations = {}; app.crops = {}
-            app.rotation = Mock(); app.log = Mock(); app.load_preview = Mock()
-            app.scan = SimpleNamespace(crop_errors={})
-            app.update_run_detail = Mock()
-            app.select_video()
-            app.rotation.set.assert_called_with('Upright — no rotation')
-            app.load_preview.assert_called_with(clip, 0)
-            app.rotations[clip.path.name] = 180
-            app.select_video()
-            app.rotation.set.assert_called_with('180°')
-            app.load_preview.assert_called_with(clip, 180)
+        with TemporaryDirectory() as folder, patch('goprovbox.gui.data_directory', return_value=Path(folder)):
+            (Path(folder) / 'settings.json').write_text(json.dumps({'welcomed': True}))
+            root = tk.Tk(); root.withdraw()
+            try:
+                app = App(root)
+                app.load_preview = Mock(); app.update_run_detail = Mock(); app.log = Mock()
+                clip = video(Path('GX010001.mp4'))
+                app.selected_video = Mock(return_value=clip)
+                app.scan = SimpleNamespace(videos=[clip], matches=[SimpleNamespace(video=clip)], crop_errors={})
+                app.included_videos = {clip.path.name}
+                for detected in (90, 180, 270, None):
+                    with self.subTest(detected=detected):
+                        clip.orientation = replace(clip.orientation, clockwise=detected)
+                        app.rotations.clear(); app.preview_video = None
+                        app.select_video()
+                        self.assertIs(app.export_video(), clip)
+                        self.assertEqual(app.rotation.get(), 'Upright — no rotation')
+                        app.load_preview.assert_called_with(clip, 0)
+                        app.rotation.set('180°'); app.change_rotation()
+                        self.assertEqual(app.rotations[clip.path.name], 180)
+                        app.load_preview.assert_called_with(clip, 180)
+                        app.select_video()
+                        self.assertEqual(app.rotation.get(), '180°')
+                app.temporary.cleanup()
+            finally:
+                for callback in root.tk.call('after', 'info'): root.after_cancel(callback)
+                root.destroy()
 
 
 class SoundPreferenceTests(unittest.TestCase):

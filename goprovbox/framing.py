@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import tkinter as tk
 from tkinter import ttk
 
@@ -11,6 +12,7 @@ from PIL import Image, ImageTk
 
 from .crop import Choice, positioned, rectangle
 from .engine import dimensions
+from .gpmf import TelemetryError
 from .media import Video, preview
 
 
@@ -65,6 +67,43 @@ def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path
         if cancel.is_set():
             raise InterruptedError("Cancelled")
     return FramingPreview(video, rotation, aspect, source, sizes, overlays, seconds)
+
+
+def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, scene_path,
+                           destination, cancel, choice):
+    """Save the cropped, composited export still and return its pixel size.
+
+    Keep the decoded source separate from the published preview so a failed or
+    cancelled scene render can never leave a raw-video fallback in its place.
+    """
+    if mode not in ("none", "four", "full"):
+        raise TelemetryError("Unknown overlay mode")
+    if mode == "full" and not (scene_path and str(scene_path).strip()):
+        raise TelemetryError("Choose a VBOX scene for the full overlay")
+    if mode == "none":
+        scene_path = ""
+    if choice != "none" and aspect is None:
+        raise TelemetryError("Keep the original VBOX video beside the VBOX runs to use cropping")
+    crop = rectangle(video.width, video.height, rotation, aspect, choice)
+    size = dimensions(video, rotation, max_size, crop)
+    if cancel.is_set():
+        raise InterruptedError("Cancelled")
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".output-preview-", dir=destination.parent) as temporary:
+        temporary = Path(temporary)
+        prepared = prepare_preview(video, matches, rotation, max_size,
+                                   aspect if crop is not None else None, mode, scene_path,
+                                   temporary / "source.png", cancel)
+        frame = prepared.output(choice, size).convert("RGB")
+        if cancel.is_set():
+            raise InterruptedError("Cancelled")
+        rendered = temporary / "output.png"
+        frame.save(rendered, format="PNG")
+        if cancel.is_set():
+            raise InterruptedError("Cancelled")
+        rendered.replace(destination)
+    return size
 
 
 class CropEditor(tk.Toplevel):

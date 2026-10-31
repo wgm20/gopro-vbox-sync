@@ -135,6 +135,23 @@ class RunSelectionTests(unittest.TestCase):
         self.assertNotIn('second.MP4', self.app.included_videos)
         self.assertIn('first.MP4', self.app.included_videos)
 
+    def test_details_inspects_an_excluded_highlight_without_changing_the_export_target(self):
+        self.app.tree.selection_set('1'); self.app.select_video()
+        self.app.toggle_include('0')
+        self.app.tree.selection_set('0'); self.app.select_video()
+        self.assertIs(self.app.selected_video(), self.clips[0])
+        self.assertIs(self.app.export_video(), self.clips[1])
+        self.app.log_messages = ['Latest scan log']
+        with patch('goprovbox.gui.recording_details', return_value='Excluded clip details') as details:
+            self.app.options_menu.invoke('Details…')
+        self.assertEqual(details.call_args.args[0], self.clips[0].path.name)
+        window = next(widget for widget in self.root.winfo_children() if isinstance(widget, tk.Toplevel))
+        text = next(widget for widget in window.winfo_children() if isinstance(widget, tk.Text))
+        self.assertIn('Excluded clip details', text.get('1.0', 'end'))
+        self.assertIn('Latest scan log', text.get('1.0', 'end'))
+        self.assertIs(self.app.export_video(), self.clips[1])
+        window.destroy()
+
     def test_fastest_sort_is_numeric_and_unavailable_is_last_in_both_directions(self):
         self.app.selection_data['0']['fastest_lap'] = {'duration_seconds': 70}
         self.app.selection_data['1']['fastest_lap'] = {'duration_seconds': 80}

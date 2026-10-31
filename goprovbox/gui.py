@@ -19,7 +19,6 @@ from PIL import Image, ImageDraw, ImageTk
 from . import __version__
 from .engine import scan_folder, export
 from .reports import export_report_path
-from .media import preview
 from .crop import rectangle
 from .runinfo import video_run_info
 from .selection import TIME_BASES, lap_time, moment, row_values, recording_details
@@ -74,6 +73,9 @@ class App:
         self.preview_image = None
         self.preview_source = None
         self.preview_display_size = None
+        self.preview_cancel = Event()
+        self.preview_request = None
+        self.preview_video = None
         self.selection_data = {}
         self.sort_column = "start"
         self.sort_reverse = False
@@ -111,7 +113,8 @@ class App:
         if self.time_basis.get() not in TIME_BASES:
             self.time_basis.set("Local time")
         self.run_detail = tk.StringVar()
-        self.preview_title = tk.StringVar(value="Select a video to preview")
+        self.export_video_name = tk.StringVar()
+        self.preview_title = tk.StringVar(value="Tick a video to preview its export")
         self.status = tk.StringVar(value="Choose both folders above, then click Scan for matches.")
         self.summary = tk.StringVar(value="")
         root.title(f"GoPro VBOX Sync {__version__}")
@@ -204,10 +207,16 @@ class App:
         self.tree.bind("<space>", self.toggle_focused_include)
         self.log_messages = []
         preview_controls = ttk.Frame(right); preview_controls.pack(side="bottom", fill="x")
+        exportrow = ttk.Frame(right); exportrow.pack(fill="x", pady=(0,6))
+        ttk.Label(exportrow, text="Export video").pack(side="left", padx=(0,8))
+        self.export_video_combo = ttk.Combobox(exportrow, textvariable=self.export_video_name,
+                                              state="disabled", width=18)
+        self.export_video_combo.pack(side="left", fill="x", expand=True)
+        self.export_video_combo.bind("<<ComboboxSelected>>", self.choose_export_video)
         self.preview_heading = ttk.Label(right, textvariable=self.preview_title, font=("Segoe UI", 10, "bold"),
                                          wraplength=360, justify="left")
         self.preview_heading.pack(fill="x", pady=(0,6))
-        self.preview_label = ttk.Label(right, text="Preview", anchor="center", background="#dce3e9")
+        self.preview_label = ttk.Label(right, text="Export preview", anchor="center", background="#dce3e9", wraplength=220)
         self.preview_label.pack(fill="both", expand=True)
         self.preview_label.bind("<Configure>", self.resize_preview)
         rotationrow = ttk.Frame(preview_controls); rotationrow.pack(fill="x", pady=(8,0))
@@ -221,6 +230,8 @@ class App:
         ttk.Label(self.scenerow, text="Scene", width=9).pack(side="left")
         self.scene_entry = ttk.Entry(self.scenerow, textvariable=self.scene_path)
         self.scene_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self.scene_entry.bind("<FocusOut>", self.refresh_export_preview)
+        self.scene_entry.bind("<Return>", self.refresh_export_preview)
         self.scene_button = ttk.Button(self.scenerow, text="Choose…", command=self.choose_scene)
         self.scene_button.pack(side="left", padx=(8,0))
         self.outrow = ttk.Frame(footer); self.outrow.pack(fill="x", pady=(2,10))
@@ -398,7 +409,7 @@ class App:
             else:
                 self.tree.insert("", "end", iid=row, values=values, tags=tags, image=marker)
         self.sort_rows(self.sort_column, self.sort_reverse)
-        self.update_run_detail()
+        self.sync_export_preview()
 
     def sort_rows(self, column, reverse=None):
         if reverse is None:
@@ -427,16 +438,73 @@ class App:
         for key_, text, _ in TABLE_COLUMNS:
             self.tree.heading(key_, text=text + (" ▼" if reverse else " ▲") if key_ == column else text)
 
+    def export_candidates(self):
+        if self.scan is None:
+            return []
+        linked = {id(match.video) for match in getattr(self.scan, "matches", ())}
+        return sorted((video for video in getattr(self.scan, "videos", ())
+                       if video.path.name in self.included_videos and id(video) in linked),
+                      key=lambda video: (video.clock.utc(0), video.path.name.casefold()))
+
+    def export_video(self):
+        return next((video for video in self.export_candidates()
+                     if video.path.name == self.export_video_name.get()), None)
+
+    def clear_export_preview(self):
+        self.preview_cancel.set(); self.preview_generation += 1
+        self.preview_request = None; self.preview_video = None
+        self.export_video_name.set("")
+        self.export_video_combo.configure(values=(), state="disabled")
+        self.preview_source = None; self.preview_display_size = None
+        self.preview_title.set("Tick a video to preview its export")
+        self.preview_heading.configure(foreground="#203047")
+        self.preview_label.configure(image="", text="Export preview")
+        self.rotation.set(next(iter(ROTATIONS))); self.crop_note.set(""); self.run_detail.set("")
+
+    def sync_export_preview(self, prefer=None, refresh=False):
+        candidates = self.export_candidates()
+        names = tuple(video.path.name for video in candidates)
+        current = self.export_video_name.get()
+        chosen = prefer if prefer in names else current if current in names else names[0] if names else ""
+        if not chosen:
+            self.clear_export_preview(); self.set_busy(self.busy)
+            return
+        self.export_video_combo.configure(values=names)
+        self.export_video_name.set(chosen)
+        video = self.export_video()
+        changed = video is not self.preview_video
+        self.preview_video = video
+        rotation = self.rotations.get(chosen, 0)
+        self.rotation.set(next(label for label, value in ROTATIONS.items() if value == rotation))
+        self.update_run_detail(); self.set_busy(self.busy)
+        if changed or refresh or self.preview_request is None:
+            if refresh:
+                self.preview_request = None
+            self.load_preview(video, rotation)
+
+    def choose_export_video(self, *_):
+        if self.busy:
+            return
+        self.sync_export_preview()
+        video = self.export_video()
+        if video:
+            row = str(self.scan.videos.index(video))
+            self.tree.selection_set(row); self.tree.focus(row); self.tree.see(row)
+
+    def refresh_export_preview(self, *_):
+        if self.busy:
+            return
+        if _:
+            self.preview_request = None
+        video = self.export_video()
+        if video:
+            self.load_preview(video, self.rotations.get(video.path.name, 0))
+
     def update_run_detail(self):
-        video = self.selected_video()
+        video = self.export_video()
         if video is None:
             self.run_detail.set("")
-            self.preview_title.set("Select a video to preview")
-            self.preview_heading.configure(foreground="#203047")
             return
-        included = video.path.name in self.included_videos
-        self.preview_title.set(video.path.name + (" · Included" if included else " · Not included"))
-        self.preview_heading.configure(foreground="#203047" if included else "#9f3b00")
         info = video_run_info(self.scan, video)
         best = info["fastest_lap"]
         description = (f"Best in file {lap_time(best['duration_seconds'])} · {info['fastest_run']}"
@@ -483,12 +551,9 @@ class App:
             self.log("Recording sources or scan options changed; saved framing was cleared.")
         self.scan = None; self.result = None
         self.selection_data.clear(); self.run_detail.set("")
-        self.preview_title.set("Select a video to preview"); self.preview_heading.configure(foreground="#203047")
         self.included_videos.clear(); self.tree.delete(*self.tree.get_children()); self.summary.set("")
         self.rotations.clear(); self.crops.clear(); self.crop_note.set("")
-        self.preview_generation += 1
-        self.preview_source = None; self.preview_display_size = None
-        self.preview_label.configure(image="", text="Preview")
+        self.clear_export_preview()
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
         self.status.set("Choose both folders above, then click Scan for matches.")
         self.quality_changed()
@@ -516,7 +581,7 @@ class App:
         self.tree.set(row, "include", "☑" if name in self.included_videos else "☐")
         if self.sort_column == "include":
             self.sort_rows("include", self.sort_reverse)
-        self.update_selection_summary(); self.update_run_detail(); self.quality_changed(); self.set_busy(False)
+        self.update_selection_summary(); self.sync_export_preview(); self.quality_changed(); self.set_busy(False)
 
     def click_include(self, event):
         if self.tree.identify_region(event.x, event.y) == "cell" and self.tree.identify_column(event.x) == "#1":
@@ -525,6 +590,7 @@ class App:
                 if row:
                     self.tree.selection_set(row); self.tree.focus(row); self.tree.focus_set()
                     self.toggle_include(row)
+                    self.sync_export_preview(prefer=self.scan.videos[int(row)].path.name)
             return "break"
 
     def toggle_focused_include(self, event=None):
@@ -532,6 +598,7 @@ class App:
         if row and not self.busy and self.scan is not None:
             self.tree.selection_set(row)
             self.toggle_include(row)
+            self.sync_export_preview(prefer=self.scan.videos[int(row)].path.name)
         return "break"
 
     def output_name(self):
@@ -548,6 +615,7 @@ class App:
                     for suffix in ("", " Cropped") for trimmed in ("", " Matched")}
         if self.folder.get() and self.output.get() in defaults:
             self.output.set(str(Path(self.folder.get()) / self.output_name()))
+        self.refresh_export_preview()
 
     def overlay_changed(self, *_):
         mode=OVERLAYS[self.overlay_mode.get()]
@@ -569,11 +637,12 @@ class App:
                                                      ("VBOX HD2 scene", "*.vvhsn *.VVHSN")])
         if name:
             self.scene_path.set(name)
-            self.preview_overlay()
+            self.preview_request = None
+            self.refresh_export_preview()
 
     def preview_overlay(self):
-        video = self.selected_video()
-        if not video:
+        video = self.export_video()
+        if not video or self.busy:
             return
         mode=OVERLAYS[self.overlay_mode.get()]
         path = self.scene_path.get().strip() if mode != "none" else ""
@@ -627,9 +696,11 @@ class App:
         enabled = OVERLAYS[self.overlay_mode.get()] != "none" and not busy
         self.scene_entry.configure(state="normal" if enabled else "disabled")
         self.scene_button.configure(state="normal" if enabled else "disabled")
-        self.overlay_preview.configure(state="normal" if not busy and self.scan and self.scan.matches else "disabled")
-        self.rotate_combo.configure(state="disabled" if busy or not self.scan else "readonly")
-        self.create.configure(state="disabled" if busy or not self.scan or not self.included_videos else "normal")
+        target = self.export_video()
+        self.export_video_combo.configure(state="readonly" if target and not busy else "disabled")
+        self.overlay_preview.configure(state="normal" if target and not busy else "disabled")
+        self.rotate_combo.configure(state="readonly" if target and not busy else "disabled")
+        self.create.configure(state="normal" if target and not busy else "disabled")
         self.stop.configure(state="normal" if busy else "disabled")
         self.tree.configure(selectmode="none" if busy else "browse")
 
@@ -670,9 +741,7 @@ class App:
         self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
         self.selection_data.clear(); self.run_detail.set("")
-        self.preview_title.set("Select a video to preview"); self.preview_heading.configure(foreground="#203047")
-        self.preview_generation += 1; self.preview_label.configure(image="", text="Preview")
-        self.preview_source = None; self.preview_display_size = None
+        self.clear_export_preview()
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
         self.tree.delete(*self.tree.get_children())
         self.status.set("Reading GPS timestamps and checking video orientation…")
@@ -687,16 +756,15 @@ class App:
         video = self.selected_video()
         if video is None or self.busy:
             return
-        self.update_run_detail()
-        value = self.rotations.get(video.path.name, 0)
-        self.rotation.set(next(k for k, v in ROTATIONS.items() if v == value))
+        if video.path.name not in self.included_videos:
+            return
+        self.sync_export_preview(prefer=video.path.name)
         if video.path.name in self.scan.crop_errors:
             self.log(self.scan.crop_errors[video.path.name])
         self.log(f"{video.path.name}: {video.orientation.evidence}")
-        self.load_preview(video, value or 0)
 
     def change_rotation(self, *_):
-        video = self.selected_video()
+        video = self.export_video()
         if video and self.rotation.get() in ROTATIONS:
             value = ROTATIONS[self.rotation.get()]
             self.rotations[video.path.name] = value
@@ -712,35 +780,51 @@ class App:
         return rectangle(video.width, video.height, rotation, ref.aspect, mode)
 
     def load_preview(self, video, rotation):
+        if video is not self.export_video():
+            return
+        scan = self.scan
+        size = QUALITY[self.quality.get()]
+        mode = OVERLAYS[self.overlay_mode.get()]
+        path = self.scene_path.get().strip() if mode != "none" else ""
+        choice = deepcopy(self.crops.get(video.path.name, "none"))
+        ref = scan.crop_references.get(video.path.name)
+        aspect = ref.aspect if ref else None
+        request = (id(scan), id(video), rotation, size, mode, path,
+                   str(aspect), json.dumps(choice, sort_keys=True))
+        if request == self.preview_request:
+            return
+        self.preview_cancel.set()
+        self.preview_cancel = cancelled = Event()
+        self.preview_request = request
         self.preview_generation += 1
         generation = self.preview_generation
         destination = Path(self.temporary.name) / f"frame-{generation}.png"
-        match = next((m for m in self.scan.matches if m.video is video), None)
-        seconds = (video.clock.media_time(match.rows[0].utc) + 5) if match else 30
-        seconds = min(seconds, video.duration * .8)
-        crop = self.video_crop(video, rotation)
-        ref = self.scan.crop_references.get(video.path.name)
-        from .engine import dimensions
-        output_size = dimensions(video, rotation, QUALITY[self.quality.get()], crop)
+        matches = [match for match in scan.matches if match.video is video]
         note = f"VBOX {ref.label} · no crop" if ref else "VBOX crop needs the original VBOX video. See Options → Details."
-        if crop:
+        crop = self.video_crop(video, rotation)
+        if crop is not None:
             upright = (video.height, video.width) if rotation % 180 else (video.width, video.height)
             note = f"VBOX {ref.label} · custom crop"
             if (crop.width, crop.height) == upright:
                 note = f"VBOX {ref.label} · already the same shape"
         self.crop_note.set(note)
-        self.preview_label.configure(image="", text="Loading preview…")
+        self.preview_title.set("Export preview")
+        self.preview_label.configure(image="", text="Rendering export preview…")
         self.preview_source = None; self.preview_display_size = None
-        def work():
+        events = self.events
+        def work(cache=self.temporary):
             try:
-                preview(video.path, seconds, rotation, destination, crop=crop, output_size=output_size)
-                with Image.open(destination) as frame:
-                    frame.thumbnail((360, 240), Image.Resampling.LANCZOS)
-                    frame.save(destination)
-                self.events.put(("preview", (generation, destination)))
+                from .framing import prepare_output_preview
+                output_size = prepare_output_preview(video, matches, rotation, size, aspect, mode,
+                                                      path, destination, cancelled, choice)
+                if not cancelled.is_set():
+                    events.put(("export_preview", (generation, destination, output_size)))
+            except InterruptedError:
+                pass
             except Exception as exc:
-                self.events.put(("preview_failed", generation))
-                self.events.put(("log", f"Preview unavailable: {exc}"))
+                if not cancelled.is_set():
+                    events.put(("preview_failed", (generation, str(exc))))
+                    events.put(("log", f"{video.path.name}: export preview unavailable: {exc}"))
         Thread(target=work, daemon=True).start()
 
     def begin_export(self):
@@ -791,13 +875,19 @@ class App:
                     self.log(value)
                 elif kind == "framing_preview":
                     prepared, choice, scan = value
-                    if not self.closing and not self.cancel.is_set() and self.scan is scan:
+                    if (not self.closing and not self.cancel.is_set() and self.scan is scan
+                            and prepared.video is self.export_video()):
                         from .framing import CropEditor
                         def apply(choice, video=prepared.video, rotation=prepared.rotation):
+                            if (self.scan is not scan or video is not self.export_video()
+                                    or self.rotations.get(video.path.name, 0) != rotation):
+                                self.log("Framing was not applied because the export selection changed.")
+                                return
                             self.crops[video.path.name] = deepcopy(choice)
                             crop_state = "no crop" if choice == "none" else "crop enabled"
                             included = "included" if video.path.name in self.included_videos else "not included"
                             self.log(f"{video.path.name}: framing applied — {crop_state}; {included}.")
+                            self.preview_request = None
                             self.quality_changed()
                             self.load_preview(video, rotation)
                         CropEditor(self.root, prepared, choice, apply,
@@ -812,17 +902,21 @@ class App:
                 elif kind == "tools_ready":
                     self.status.set("Video tools ready. Choose both folders, then click Scan for matches.")
                     if value and not self.closing: self.root.after(0, value)
-                elif kind == "preview":
-                    generation, destination = value
-                    if generation == self.preview_generation and not self.closing:
+                elif kind == "export_preview":
+                    generation, destination, output_size = value
+                    if generation == self.preview_generation and not self.closing and self.export_video():
                         with Image.open(destination) as frame:
                             self.preview_source = frame.convert("RGB")
                         self.preview_display_size = None
+                        self.preview_title.set(f"Export preview · {output_size[0]} × {output_size[1]}")
                         self.resize_preview()
                 elif kind == "preview_failed":
-                    if value == self.preview_generation:
+                    generation, message = value if isinstance(value, tuple) else (value, "Select the export video again to retry.")
+                    if generation == self.preview_generation and self.export_video():
                         self.preview_source = None; self.preview_display_size = None
-                        self.preview_label.configure(image="", text="Preview unavailable. Select this recording again to retry.")
+                        self.preview_request = None
+                        self.preview_title.set("Export preview unavailable")
+                        self.preview_label.configure(image="", text="Export preview unavailable.\n" + message[:180])
                 elif kind == "scan":
                     self.scan = value
                     self.included_videos = {m.video.path.name for m in value.matches}
@@ -863,6 +957,7 @@ class App:
             self.finish_close()
 
     def finish_close(self):
+        self.preview_cancel.set()
         self.save_preferences()
         self.root.destroy()
 

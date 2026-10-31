@@ -4,6 +4,7 @@ from threading import Event
 import json
 import shutil
 import sys
+import time
 import tkinter as tk
 
 from . import __version__
@@ -60,6 +61,12 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     assert app.options_menu.type("Include GoPro subfolders") == "checkbutton"
     assert app.recursive_gopro.get()
     assert not hasattr(app, "quality_combo")
+    custom = {"mode": "custom", "x": .5, "y": .75}
+    app.crops = {chosen: custom.copy()}
+    app.overlay_mode.set("Full scene · no rear camera" if scene_path else "Driving data")
+    if scene_path:
+        app.scene_path.set(str(scene_path))
+    app.overlay_changed()
     app.scan = scan; app.included_videos = {chosen}
     app.time_basis.set("UTC")
     assert app.tree.set("0", "date") == "2026-01-01"
@@ -71,10 +78,19 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     app.sort_rows("start", True)
     assert app.tree.get_children()[0] == "1"
     assert app.included_videos == {chosen}
+    deadline = time.monotonic() + 30
+    while app.preview_source is None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(.02)
+    assert app.preview_source is not None, "The composed export preview did not finish"
+    assert app.export_video().path.name == chosen
+    assert tuple(app.export_video_combo.cget("values")) == (chosen,)
+    assert app.preview_source.size == (640, 320)
+    assert app.preview_title.get() == "Export preview · 640 × 320"
+    app.preview_cancel.set()
     for callback in root.tk.call("after", "info"):
         root.after_cancel(callback)
     root.destroy(); app.temporary.cleanup()
-    custom = {"mode": "custom", "x": .5, "y": .75}
     # Exercise the packaged app at the reported long-path boundary, including
     # WAV preparation, muxing, logs, previews and the final folder rename.
     output_parent = (destination / "Race day recordings").resolve()
@@ -138,6 +154,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
               "passed": True, "matched_videos": 2, "exported_videos": 1, "export_folder": str(result),
               "report_file": str(export_report_path(result)),
               "checks": ["Tk and packaged icon", "recording date/time/per-file best-lap selection table",
+                         "checked-file-only cropped and composited export preview",
                          "separate GoPro SD card with nested DCIM folder", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor",
                          ("full saved scene overlay" if scene_path.suffix.lower() == ".gvscene"

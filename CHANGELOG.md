@@ -1,5 +1,12 @@
 # Release notes
 
+## 1.6.0b15 — released 2026-10-31
+
+- Adds **Export video**, containing only ticked, matched files, as the target for rotation, framing and the main preview. One file is selected automatically when it is the only choice; with several, the list or an included table row selects it. Highlighting an excluded row leaves the export target unchanged, while Details continues to inspect any highlighted row.
+- Replaces the main camera image with a finished **Export preview** still, using the same crop, rotation, output resolution and overlay rendering as export. The heading shows output dimensions. Settings and scene changes refresh it directly; rendering errors show an explanation without falling back to an unfinished camera image.
+- Clears the export preview and disables rotation/framing when no matched files are ticked. Discards a framing edit if its target or inclusion changes before Apply. Choosing a scene refreshes the main preview without opening the crop editor.
+- Retains per-file **Apply to this video**, the excluded-crop confirmation and the earlier source, lap-selection and scene-import features.
+
 ## 1.6.0b14 — released 2026-10-31
 
 - Fixes a selection mismatch where toggling **Include** could leave another file in the preview. Clicking its checkbox or pressing Space now selects, focuses and previews the file whose inclusion changes.

@@ -1,10 +1,14 @@
-# GoPro VBOX Sync 1.6.0b14 — 31 October 2026
+# GoPro VBOX Sync 1.6.0b15 — 31 October 2026
 
-Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. This release makes it clearer which file you are framing and which files will be exported.
+Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. Previewing and framing now follow the files chosen for export, with a finished still of the output.
 
-- Clicking **Include** or pressing Space now selects and previews the file whose inclusion you toggle. This avoids leaving a different file in the preview.
-- The main preview shows the filename and **Included** or **Not included** status. The framing editor names the file being edited and uses **Apply to this video** to make the per-file scope clear. Framing a file does not include it automatically or apply its crop to another file.
-- If enabled crops exist only on excluded files, **Create files** asks **Export without the saved crop?** and defaults to **No**, allowing you to review the selection before continuing.
+- **Choose an Export video.** This list contains only ticked, matched files. A single ticked file is selected automatically. With several, choose from the list or click an included table row. Highlighting an excluded row leaves the export view unchanged; **Options → Details…** still inspects any highlighted row.
+- **See the finished look.** The main **Export preview** is a still with the chosen crop, rotation, resolution and overlay applied. Its heading shows output width and height. Changing settings or choosing a scene updates it directly; invalid settings show an explanation instead of an unfinished camera image.
+- **Frame the chosen export.** Rotation and **Frame & preview…** always act on **Export video**. Unticking every file clears the preview and disables these controls. A framing edit is discarded if its target or export inclusion changes before applying.
+
+## Retained from 1.6.0b14 — 31 October 2026
+
+The framing editor names its file and uses **Apply to this video**. Each file has its own framing. If enabled crops exist only on files you later exclude, **Create files** asks **Export without the saved crop?** and defaults to **No** so you can review the selection.
 
 ## Included from 1.6.0b13 — 30 October 2026
 
@@ -18,7 +22,7 @@ The features introduced since the public 1.6.0b4 release remain available:
 
 Lap times are reconstructed from VBOX data using the overlay's timing method and may differ from the recorder. Incomplete laps and laps crossing data gaps are excluded. Scene rendering covers a tested subset; inspect the preview before exporting.
 
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b14-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b15-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved, and the exported MP4 also plays in ordinary video players.
 
