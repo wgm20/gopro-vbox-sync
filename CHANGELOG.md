@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b16 — released 2026-10-31
+
+- Replaces individual crop choices with one shared crop for all ticked export videos. **Apply to selected videos** applies it to the selected batch; newly ticked files inherit the same crop, and turning **Crop to VBOX** off affects the whole selection. Different crops require separate exports.
+- Renames the checked-only selector to **Preview video**. It chooses which selected file to inspect, while each finished **Export preview** still shows the shared crop. The framing editor states **Crop applies to all selected videos**.
+- Removes the obsolete excluded-file crop warning and keeps the main window focused on one crop choice for the selected batch. Source selection, lap details, Options and scene import remain available.
+
 ## 1.6.0b15 — released 2026-10-31
 
 - Adds **Export video**, containing only ticked, matched files, as the target for rotation, framing and the main preview. One file is selected automatically when it is the only choice; with several, the list or an included table row selects it. Highlighting an excluded row leaves the export target unchanged, while Details continues to inspect any highlighted row.

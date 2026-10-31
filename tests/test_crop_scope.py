@@ -16,6 +16,7 @@ from PIL import Image
 from goprovbox.crop import Reference, rectangle
 from goprovbox.engine import Scan, dimensions, intersections
 from goprovbox.framing import CropEditor, FramingPreview
+from goprovbox.gpmf import TelemetryError
 from goprovbox.gui import App
 from tests.test_core import fixture, video
 
@@ -76,7 +77,7 @@ class CropScopeTests(unittest.TestCase):
     def open_editor(self, row):
         prepared = FramingPreview(self.clips[row], 0, Fraction(16, 9), Image.new('RGB', (160, 160)),
                                   {False: (160, 160), True: (160, 90)}, {}, 1)
-        self.app.events.put(('framing_preview', (prepared, 'none', self.app.scan)))
+        self.app.events.put(('framing_preview', (prepared, deepcopy(self.app.crop_choice), self.app.scan)))
         self.app.poll()
         editors = [window for window in self.root.winfo_children() if isinstance(window, CropEditor)]
         self.assertEqual(len(editors), 1)
@@ -87,18 +88,19 @@ class CropScopeTests(unittest.TestCase):
             if 'text' in widget.keys():
                 labels.append(str(widget.cget('text')))
         self.assertIn(self.clips[row].path.name, '\n'.join(labels))
-        self.assertIn('Framing applies to this video', '\n'.join(labels))
+        self.assertIn('Crop applies to all selected videos', '\n'.join(labels))
+        self.assertIn('Apply to selected videos', labels)
         return editor
 
-    def apply_second_file_crop(self):
-        if self.clips[1].path.name not in self.app.included_videos:
-            self.app.toggle_include('1')
-        self.choose_export(1)
-        editor = self.open_editor(1)
+    def apply_shared_crop(self, row=1):
+        if self.clips[row].path.name not in self.app.included_videos:
+            self.app.toggle_include(str(row))
+        self.choose_export(row)
+        editor = self.open_editor(row)
         editor.enabled.set(True)
         editor.position = {'mode': 'custom', 'x': .5, 'y': .2}
         editor.commit()
-        return deepcopy(self.app.crops[self.clips[1].path.name])
+        return deepcopy(self.app.crop_choice)
 
     def test_excluded_highlight_does_not_change_the_export_preview_or_frame_target(self):
         self.select(1)
@@ -184,7 +186,7 @@ class CropScopeTests(unittest.TestCase):
         editor.enabled.set(True); editor.position = {'mode': 'custom', 'x': .5, 'y': .2}
         with patch('goprovbox.gui.messagebox.showinfo'), patch('goprovbox.gui.messagebox.showwarning'):
             editor.commit()
-        self.assertNotIn(self.clips[1].path.name, self.app.crops)
+        self.assertEqual(self.app.crop_choice, 'none')
         self.assertEqual(self.app.included_videos, {self.clips[0].path.name})
 
     def test_stale_editor_cannot_apply_after_the_export_target_changes(self):
@@ -194,7 +196,7 @@ class CropScopeTests(unittest.TestCase):
         editor.enabled.set(True); editor.position = {'mode': 'custom', 'x': .5, 'y': .2}
         with patch('goprovbox.gui.messagebox.showinfo'), patch('goprovbox.gui.messagebox.showwarning'):
             editor.commit()
-        self.assertFalse(self.app.crops)
+        self.assertEqual(self.app.crop_choice, 'none')
         self.assertIs(self.app.export_video(), self.clips[0])
         self.assertEqual(self.app.included_videos, {clip.path.name for clip in self.clips})
 
@@ -224,7 +226,7 @@ class CropScopeTests(unittest.TestCase):
             self.assertEqual(app.preview_source.getpixel((0, 0)), (20, 40, 100))
             self.assertEqual(app.preview_title.get(), 'Export preview · 1600 × 1600')
             choice = {'mode': 'custom', 'x': .5, 'y': .2}
-            app.crops[clip.path.name] = deepcopy(choice)
+            app.crop_choice = deepcopy(choice)
             scene_path = str(self.folder / 'Selected scene.gvscene')
             app.scene_path.set(scene_path)
             app.resolution_menu.invoke('Compact · 1280 px')
@@ -250,58 +252,87 @@ class CropScopeTests(unittest.TestCase):
             self.assertEqual(app.preview_source.size, (1280, 720))
             self.assertEqual(app.preview_source.getpixel((0, 0)), (180, 40, 70))
 
-    def test_declining_uncropped_export_keeps_crop_and_inclusion_unchanged(self):
-        choice = self.apply_second_file_crop()
-        self.app.toggle_include('1')
-        with patch('goprovbox.gui.messagebox.askyesno', return_value=False) as confirm, \
-                patch.object(self.app, 'worker') as worker:
-            self.app.begin_export()
-        confirm.assert_called_once()
-        self.assertEqual(confirm.call_args.args[0], 'Export without the saved crop?')
-        self.assertEqual(str(confirm.call_args.kwargs['default']), 'no')
-        self.assertIn(self.clips[0].path.name, confirm.call_args.args[1])
-        self.assertIn(self.clips[1].path.name, confirm.call_args.args[1])
-        worker.assert_not_called()
-        self.assertEqual(self.app.included_videos, {self.clips[0].path.name})
-        self.assertEqual(self.app.crops, {self.clips[1].path.name: choice})
-
-    def test_accepting_uncropped_export_preserves_checked_files(self):
-        self.apply_second_file_crop()
-        self.app.toggle_include('1')
-        with patch('goprovbox.gui.messagebox.askyesno', return_value=True) as confirm, \
-                patch.object(self.app, 'worker') as worker:
-            self.app.begin_export()
-        confirm.assert_called_once()
-        self.assertEqual(self.app.included_videos, {self.clips[0].path.name})
-        with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
-            worker.call_args.args[0]()
-        settings = dispatch.call_args.kwargs
-        self.assertEqual(settings['include_videos'], {self.clips[0].path.name})
-        self.assertNotIn(self.clips[0].path.name, settings['crops'])
-
-    def test_included_file_crop_survives_preview_change_sorting_and_export_snapshot(self):
-        choice = self.apply_second_file_crop()
-        self.app.toggle_include('0')
+    def test_shared_crop_exports_all_checked_files_with_an_immutable_snapshot(self):
+        choice = self.apply_shared_crop()
         self.app.sort_rows('video', True)
         self.select(0)
         with patch('goprovbox.gui.messagebox.askyesno') as confirm, patch.object(self.app, 'worker') as worker:
             self.app.begin_export()
         confirm.assert_not_called()
-        self.app.crops[self.clips[1].path.name]['y'] = .8
+        self.app.crop_choice['y'] = .8
         self.app.included_videos.clear()
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
             worker.call_args.args[0]()
-        self.assertEqual(dispatch.call_args.kwargs['include_videos'], {self.clips[1].path.name})
-        self.assertEqual(dispatch.call_args.kwargs['crops'], {self.clips[1].path.name: choice})
+        self.assertEqual(dispatch.call_args.kwargs['include_videos'], {clip.path.name for clip in self.clips})
+        self.assertEqual(dispatch.call_args.kwargs['crops'], {clip.path.name: choice for clip in self.clips})
 
-    def test_export_without_any_saved_crop_does_not_request_confirmation(self):
-        for choices in ({}, {self.clips[1].path.name: 'none'}):
-            with self.subTest(choices=choices), patch('goprovbox.gui.messagebox.askyesno') as confirm, \
-                    patch.object(self.app, 'worker') as worker:
-                self.app.crops = choices
-                self.app.begin_export()
-                confirm.assert_not_called()
-                worker.assert_called_once()
+    def test_newly_checked_video_inherits_the_same_crop(self):
+        choice = self.apply_shared_crop(0)
+        self.assertEqual(self.app.included_videos, {self.clips[0].path.name})
+        self.app.toggle_include('1')
+        self.choose_export(1)
+        self.assertEqual(self.app.crop_choice, choice)
+        self.assertEqual(self.app.video_crop(self.clips[0], 0), self.app.video_crop(self.clips[1], 0))
+        self.assertIsNotNone(self.app.video_crop(self.clips[1], 0))
+        expected = self.app.video_crop(self.clips[0], 0)
+        self.app.toggle_include('0'); self.app.toggle_include('1')
+        self.assertIsNone(self.app.export_video())
+        self.assertEqual(self.app.crop_choice, choice)
+        self.app.toggle_include('0')
+        self.assertIs(self.app.export_video(), self.clips[0])
+        self.assertEqual(self.app.crop_choice, choice)
+        self.assertEqual(self.app.video_crop(self.clips[0], 0), expected)
+
+    def test_disabling_crop_removes_it_from_every_checked_video(self):
+        self.apply_shared_crop()
+        editor = self.open_editor(1)
+        self.assertTrue(editor.enabled.get())
+        editor.enabled.set(False); editor.commit()
+        self.assertEqual(self.app.crop_choice, 'none')
+        for clip in self.clips:
+            self.assertIsNone(self.app.video_crop(clip, 0))
+        with patch('goprovbox.gui.messagebox.askyesno') as confirm, patch.object(self.app, 'worker') as worker:
+            self.app.begin_export()
+        confirm.assert_not_called()
+        with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
+            worker.call_args.args[0]()
+        self.assertEqual(dispatch.call_args.kwargs['crops'], {})
+        self.assertEqual(dispatch.call_args.kwargs['include_videos'], {clip.path.name for clip in self.clips})
+
+    def test_shared_crop_blocks_edit_and_export_when_a_checked_video_has_no_reference(self):
+        choice = self.apply_shared_crop()
+        self.choose_export(0)
+        for thread in threading.enumerate():
+            if thread.ident not in self.initial_threads:
+                thread.join(timeout=2)
+        self.app.poll()
+        self.assertIsNotNone(self.app.preview_source)
+        self.app.scan.crop_references.pop(self.clips[1].path.name)
+        message = 'Missing original VBOX video for ' + self.clips[1].path.name
+        with patch('goprovbox.framing.prepare_output_preview', side_effect=TelemetryError(message)):
+            self.choose_export(1)
+            self.assertIsNone(self.app.preview_source)
+            self.assertFalse(self.app.preview_label.cget('image'))
+            for thread in threading.enumerate():
+                if thread.ident not in self.initial_threads:
+                    thread.join(timeout=2)
+            self.app.poll()
+        self.assertEqual(self.app.preview_title.get(), 'Export preview unavailable')
+        self.assertIn(message, self.app.preview_label.cget('text'))
+        self.assertIsNone(self.app.preview_source)
+        self.assertFalse(self.app.preview_label.cget('image'))
+        with patch('goprovbox.gui.messagebox.showerror') as error, patch.object(self.app, 'worker') as worker:
+            self.app.preview_overlay()
+        error.assert_called_once()
+        worker.assert_not_called()
+        self.assertEqual(self.app.crop_choice, choice)
+        with patch('goprovbox.gui.messagebox.showerror') as error, patch.object(self.app, 'worker') as worker:
+            self.app.begin_export()
+        error.assert_called_once()
+        self.assertIn(self.clips[1].path.name, error.call_args.args[1])
+        worker.assert_not_called()
+        self.assertEqual(self.app.crop_choice, choice)
+        self.assertEqual(self.app.included_videos, {clip.path.name for clip in self.clips})
 
 
 if __name__ == '__main__':

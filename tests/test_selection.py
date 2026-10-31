@@ -2,17 +2,20 @@
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 from unittest.mock import Mock, patch
 import json
 import queue
 import shutil
 import unittest
+from PIL import Image
 from tests.export_case import ExportTestCase
 from goprovbox.reports import export_report_path
 
+from goprovbox.crop import reference_for
 from goprovbox.engine import Scan, export, fingerprint, intersections, select_for_export
 from goprovbox.gpmf import TelemetryError
-from goprovbox.media import executable, run
+from goprovbox.media import executable, preview, probe, run
 from tests.test_core import fixture, video
 
 
@@ -48,22 +51,13 @@ class SelectionTests(ExportTestCase):
 
     def test_gui_dispatch_captures_checkboxes_not_the_preview_row(self):
         from goprovbox.gui import App
-        app = App.__new__(App)
-        app.scan = self.scan
-        app.included_videos = {'GX010002.mp4'}
-        app.output = Mock(); app.output.get.return_value = str(self.folder / 'out')
-        app.quality = Mock(); app.quality.get.return_value = 'HD · 1920 px'
-        app.overlay_mode = Mock(); app.overlay_mode.get.return_value = 'None'
-        app.rotations = {}; app.crops = {'GX010002.mp4': 'top'}; app.status = Mock(); app.progress = {}; app.cancel = Mock()
-        app.overlap_only = Mock(); app.overlap_only.get.return_value = True
-        app.audio_source = Mock(); app.audio_source.get.return_value = 'VBOX (GoPro for gaps)'
-        app.events = queue.Queue(); app.worker = Mock(); app.log = Mock()
-        app.selected_video = Mock(return_value=self.clips[0])
+        self.scan.crop_references = {'GX010002.mp4': Mock()}
+        app = self.gui_export_app({'GX010002.mp4'}, 'top')
         App.begin_export(app)
         job = app.worker.call_args.args[0]
         # A pending job owns a snapshot even if UI state is subsequently reset.
         app.included_videos.clear()
-        app.crops.clear()
+        app.crop_choice = 'none'
         app.overlap_only.get.return_value = False
         app.audio_source.get.return_value = 'GoPro'
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
@@ -74,6 +68,95 @@ class SelectionTests(ExportTestCase):
         self.assertEqual(dispatch.call_args.kwargs['audio_source'], 'vbox')
         self.assertEqual(dispatch.call_args.kwargs['rotations'], {v.path.name: 0 for v in self.clips})
         app.selected_video.assert_not_called()
+
+    def gui_export_app(self, included, crop_choice):
+        from goprovbox.gui import App
+        app = App.__new__(App)
+        app.scan = self.scan
+        app.included_videos = set(included)
+        app.output = Mock(); app.output.get.return_value = str(self.folder / 'out')
+        app.quality = Mock(); app.quality.get.return_value = 'HD · 1920 px'
+        app.overlay_mode = Mock(); app.overlay_mode.get.return_value = 'None'
+        app.rotations = {}; app.crop_choice = crop_choice; app.status = Mock(); app.progress = {}; app.cancel = Event()
+        app.overlap_only = Mock(); app.overlap_only.get.return_value = True
+        app.audio_source = Mock(); app.audio_source.get.return_value = 'VBOX (GoPro for gaps)'
+        app.events = queue.Queue(); app.worker = Mock(); app.log = Mock()
+        app.selected_video = Mock(return_value=self.clips[0])
+        return app
+
+    @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
+    def test_gui_shared_custom_crop_reaches_both_encoded_videos(self):
+        from goprovbox.gui import App
+        for index, clip in enumerate(self.clips):
+            side = 160 * (index + 1)
+            bands = (f'color=white:s={side}x{side}:r=30,'
+                     f'drawbox=x=0:y=0:w={side}:h={side // 4}:color=red:t=fill,'
+                     f'drawbox=x=0:y={side // 4}:w={side}:h={side // 4}:color=green:t=fill,'
+                     f'drawbox=x=0:y={side // 2}:w={side}:h={side // 4}:color=blue:t=fill')
+            run([executable('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i', bands,
+                 '-t', '3', '-c:v', 'libx264', str(clip.path)])
+            self.clips[index] = replace(clip, width=side, height=side)
+        original = self.folder / 'VBOX0001_0001.mp4'
+        run([executable('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i', 'color=black:s=160x80:r=30',
+             '-t', '3', '-c:v', 'libx264', str(original)])
+        excluded = video(self.folder / 'unchecked.mp4', duration=3, rotation=None)
+        excluded.path.write_bytes(b'unchecked source')
+        self.scan.videos = self.clips + [excluded]
+        self.scan.matches = [m for clip in self.scan.videos for m in intersections(self.vbo, clip)]
+        self.scan.fingerprints = {path.name: fingerprint(path)
+                                  for path in [clip.path for clip in self.scan.videos] + [self.vbo.path]}
+        self.scan.crop_references = {
+            clip.path.name: reference_for([m for m in self.scan.matches if m.video is clip])
+            for clip in self.clips}
+        excluded.path.unlink()
+        included = {clip.path.name for clip in self.clips}
+        choice = {'mode': 'custom', 'x': .5, 'y': .25}
+        app = self.gui_export_app(included, choice)
+        app.selected_video.return_value = excluded
+        app.audio_source.get.return_value = 'GoPro'
+        App.begin_export(app)
+        job = app.worker.call_args.args[0]
+        choice['y'] = 1.0
+        app.crop_choice = 'none'
+        app.included_videos.clear()
+
+        def software_export(*args, **kwargs):
+            return export(*args, encoder='software', **kwargs)
+
+        with patch('goprovbox.gui.export', side_effect=software_export) as dispatch:
+            job()
+        self.assertEqual(dispatch.call_args.kwargs['include_videos'], included)
+        self.assertEqual(dispatch.call_args.kwargs['crops'],
+                         {name: {'mode': 'custom', 'x': .5, 'y': .25} for name in included})
+        app.selected_video.assert_not_called()
+        events = []
+        while not app.events.empty():
+            events.append(app.events.get_nowait())
+        result = next(value for kind, value in events if kind == 'complete')
+        report = json.loads(export_report_path(result, 'report.json').read_text(encoding='utf-8'))
+        self.assertEqual({media['source'] for media in report['media']}, included)
+        self.assertEqual(report['excluded_videos'], [excluded.path.name])
+        self.assertEqual(set(report['settings']['crops']), included)
+        self.assertEqual(len(list(result.glob('*.mp4'))), 2)
+        self.assertTrue(report['outputs'])
+        self.assertTrue(all(output['telemetry_preserved'] for output in report['outputs']))
+        for clip in self.clips:
+            with self.subTest(source=clip.path.name):
+                media = next(media for media in report['media'] if media['source'] == clip.path.name)
+                movie = result / media['file']
+                width, height = clip.width, clip.height // 2
+                self.assertEqual(media['verification']['dimensions'], [width, height])
+                self.assertEqual(media['crop']['rectangle'],
+                                 {'width': width, 'height': height, 'x': 0, 'y': clip.height // 8})
+                self.assertEqual(media['crop']['position'], {'x': .5, 'y': .25})
+                stream = next(stream for stream in probe(movie)['streams'] if stream['codec_type'] == 'video')
+                self.assertEqual((stream['width'], stream['height']), (width, height))
+                frame = self.folder / (clip.path.stem + '.png')
+                preview(movie, 1, 0, frame, output_size=(width, height))
+                with Image.open(frame) as image:
+                    for y, expected in zip((height // 8, height * 3 // 8, height * 7 // 8),
+                                           ((255, 0, 0), (0, 128, 0), (0, 0, 255))):
+                        self.assertLess(max(abs(a - b) for a, b in zip(image.getpixel((width // 2, y))[:3], expected)), 18)
 
     @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
     def test_real_export_skips_unchecked_media_and_selection_changes_rerun(self):

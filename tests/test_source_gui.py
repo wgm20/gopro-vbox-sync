@@ -249,12 +249,12 @@ class SourcePickerTests(unittest.TestCase):
                                 (app.gopro_folder, "")):
             with self.subTest(variable=variable):
                 app.scan = object(); app.result = self.home / "old result"
-                app.included_videos.add("clip.mp4"); app.crops["clip.mp4"] = "top"
+                app.included_videos.add("clip.mp4"); app.crop_choice = "top"
                 app.tree.insert("", "end", iid="0", values=("yes", "clip.mp4", "run.vbo", "1 min"))
                 generation = app.preview_generation
                 variable.set(value)
                 self.assertIsNone(app.scan); self.assertIsNone(app.result)
-                self.assertFalse(app.included_videos); self.assertFalse(app.crops)
+                self.assertFalse(app.included_videos); self.assertEqual(app.crop_choice, "none")
                 self.assertFalse(app.tree.get_children())
                 self.assertGreater(app.preview_generation, generation)
                 self.assertTrue(app.create.instate(["disabled"]))

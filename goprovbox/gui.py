@@ -67,7 +67,7 @@ class App:
         self.busy = False
         self.closing = False
         self.rotations = {}
-        self.crops = {}
+        self.crop_choice = "none"
         self.included_videos = set()
         self.preview_generation = 0
         self.preview_image = None
@@ -208,7 +208,7 @@ class App:
         self.log_messages = []
         preview_controls = ttk.Frame(right); preview_controls.pack(side="bottom", fill="x")
         exportrow = ttk.Frame(right); exportrow.pack(fill="x", pady=(0,6))
-        ttk.Label(exportrow, text="Export video").pack(side="left", padx=(0,8))
+        ttk.Label(exportrow, text="Preview video").pack(side="left", padx=(0,8))
         self.export_video_combo = ttk.Combobox(exportrow, textvariable=self.export_video_name,
                                               state="disabled", width=18)
         self.export_video_combo.pack(side="left", fill="x", expand=True)
@@ -547,12 +547,12 @@ class App:
     def source_changed(self, *_):
         if self.busy:
             return
-        if any(choice != "none" for choice in self.crops.values()):
+        if self.crop_choice != "none":
             self.log("Recording sources or scan options changed; saved framing was cleared.")
         self.scan = None; self.result = None
         self.selection_data.clear(); self.run_detail.set("")
         self.included_videos.clear(); self.tree.delete(*self.tree.get_children()); self.summary.set("")
-        self.rotations.clear(); self.crops.clear(); self.crop_note.set("")
+        self.rotations.clear(); self.crop_choice = "none"; self.crop_note.set("")
         self.clear_export_preview()
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
         self.status.set("Choose both folders above, then click Scan for matches.")
@@ -603,7 +603,7 @@ class App:
 
     def output_name(self):
         name = "GoPro Circuit Tools Overlay" if OVERLAYS[self.overlay_mode.get()] != "none" else "GoPro Circuit Tools"
-        if any(mode != "none" for key, mode in self.crops.items() if key in self.included_videos):
+        if self.crop_choice != "none":
             name += " Cropped"
         if self.overlap_only.get():
             name += " Matched"
@@ -650,8 +650,14 @@ class App:
             messagebox.showerror("Choose a scene", "Choose a VBOX scene for the full overlay."); return
         rotation = self.rotations.get(video.path.name, 0)
         scan, size = self.scan, QUALITY[self.quality.get()]
-        choice = deepcopy(self.crops.get(video.path.name, "none"))
+        choice = deepcopy(self.crop_choice)
         ref = scan.crop_references.get(video.path.name)
+        if choice != "none" and ref is None:
+            messagebox.showerror("Crop unavailable",
+                "Keep the original VBOX video beside the VBOX runs, then scan again to adjust this crop.\n\n"
+                "You can also choose another Preview video with cropping available to change or turn off the crop for all selected videos.",
+                parent=self.root)
+            return
         destination = Path(self.temporary.name) / "framing-source.png"
         self.status.set("Preparing the crop editor and output preview…")
         def work():
@@ -735,9 +741,9 @@ class App:
         if not gopro_folder.is_dir():
             messagebox.showerror("Choose GoPro videos", "Choose the SD card or folder with your GoPro videos."); return
         recursive_gopro = self.recursive_gopro.get()
-        if any(choice != "none" for choice in self.crops.values()):
+        if self.crop_choice != "none":
             self.log("Starting a new scan; saved framing was cleared. Set framing again after scanning.")
-        self.result = None; self.rotations = {}; self.crops = {}; self.progress["value"] = 0
+        self.result = None; self.rotations = {}; self.crop_choice = "none"; self.progress["value"] = 0
         self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
         self.selection_data.clear(); self.run_detail.set("")
@@ -771,7 +777,7 @@ class App:
             self.load_preview(video, value)
 
     def video_crop(self, video, rotation):
-        mode = self.crops.get(video.path.name, "none")
+        mode = self.crop_choice
         if mode == "none":
             return None
         ref = self.scan.crop_references.get(video.path.name)
@@ -786,7 +792,7 @@ class App:
         size = QUALITY[self.quality.get()]
         mode = OVERLAYS[self.overlay_mode.get()]
         path = self.scene_path.get().strip() if mode != "none" else ""
-        choice = deepcopy(self.crops.get(video.path.name, "none"))
+        choice = deepcopy(self.crop_choice)
         ref = scan.crop_references.get(video.path.name)
         aspect = ref.aspect if ref else None
         request = (id(scan), id(video), rotation, size, mode, path,
@@ -801,12 +807,14 @@ class App:
         destination = Path(self.temporary.name) / f"frame-{generation}.png"
         matches = [match for match in scan.matches if match.video is video]
         note = f"VBOX {ref.label} · no crop" if ref else "VBOX crop needs the original VBOX video. See Options → Details."
-        crop = self.video_crop(video, rotation)
-        if crop is not None:
+        crop = self.video_crop(video, rotation) if ref else None
+        if choice != "none" and ref is None:
+            note = "Crop applies to all selected videos · original VBOX video needed for this file."
+        elif crop is not None:
             upright = (video.height, video.width) if rotation % 180 else (video.width, video.height)
-            note = f"VBOX {ref.label} · custom crop"
+            note = f"Crop for all selected videos · VBOX {ref.label}"
             if (crop.width, crop.height) == upright:
-                note = f"VBOX {ref.label} · already the same shape"
+                note = f"Crop for all selected videos · already {ref.label}"
         self.crop_note.set(note)
         self.preview_title.set("Export preview")
         self.preview_label.configure(image="", text="Rendering export preview…")
@@ -836,17 +844,13 @@ class App:
             messagebox.showerror("Choose videos", "Tick at least one video to include in processing."); return
         rotations = {v.path.name: self.rotations.get(v.path.name, 0) for v in scan.videos}
         size = QUALITY[self.quality.get()]
-        crops = deepcopy(self.crops)
-        cropped_files = {name for name, choice in crops.items() if choice != "none"}
-        if cropped_files and not cropped_files.intersection(included):
-            def file_names(names):
-                ordered = sorted(names, key=str.casefold)
-                return ", ".join(ordered[:3]) + (f" and {len(ordered) - 3} more" if len(ordered) > 3 else "")
-            if not messagebox.askyesno("Export without the saved crop?",
-                f"Framing is saved for {file_names(cropped_files)}, but those files are not included.\n\n"
-                f"The included files ({file_names(included)}) have no crop applied.\n\n"
-                "Export them without cropping?", default=messagebox.NO, parent=self.root):
-                return
+        crops = {name: deepcopy(self.crop_choice) for name in included} if self.crop_choice != "none" else {}
+        missing = sorted(set(crops) - set(scan.crop_references), key=str.casefold)
+        if missing:
+            messagebox.showerror("Crop unavailable",
+                "Keep the original VBOX videos beside the VBOX runs, then scan again to crop these selected videos:\n\n"
+                + "\n".join(missing) + "\n\nOr turn off Crop to VBOX for this export.", parent=self.root)
+            return
         overlap_only = self.overlap_only.get()
         audio_source = SOUND[self.audio_source.get()]
         mode = OVERLAYS[self.overlay_mode.get()]
@@ -883,10 +887,9 @@ class App:
                                     or self.rotations.get(video.path.name, 0) != rotation):
                                 self.log("Framing was not applied because the export selection changed.")
                                 return
-                            self.crops[video.path.name] = deepcopy(choice)
+                            self.crop_choice = deepcopy(choice)
                             crop_state = "no crop" if choice == "none" else "crop enabled"
-                            included = "included" if video.path.name in self.included_videos else "not included"
-                            self.log(f"{video.path.name}: framing applied — {crop_state}; {included}.")
+                            self.log(f"Crop applied to all selected videos — {crop_state}.")
                             self.preview_request = None
                             self.quality_changed()
                             self.load_preview(video, rotation)

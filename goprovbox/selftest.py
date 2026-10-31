@@ -62,7 +62,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     assert app.recursive_gopro.get()
     assert not hasattr(app, "quality_combo")
     custom = {"mode": "custom", "x": .5, "y": .75}
-    app.crops = {chosen: custom.copy()}
+    app.crop_choice = custom.copy()
     app.overlay_mode.set("Full scene · no rear camera" if scene_path else "Driving data")
     if scene_path:
         app.scene_path.set(str(scene_path))
@@ -78,15 +78,27 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     app.sort_rows("start", True)
     assert app.tree.get_children()[0] == "1"
     assert app.included_videos == {chosen}
-    deadline = time.monotonic() + 30
-    while app.preview_source is None and time.monotonic() < deadline:
-        root.update()
-        time.sleep(.02)
-    assert app.preview_source is not None, "The composed export preview did not finish"
+    def wait_for_preview():
+        deadline = time.monotonic() + 30
+        while app.preview_source is None and time.monotonic() < deadline:
+            root.update()
+            time.sleep(.02)
+        assert app.preview_source is not None, "The composed export preview did not finish"
+    wait_for_preview()
     assert app.export_video().path.name == chosen
     assert tuple(app.export_video_combo.cget("values")) == (chosen,)
     assert app.preview_source.size == (640, 320)
     assert app.preview_title.get() == "Export preview · 640 × 320"
+    # A clip ticked after framing inherits the same crop, including its preview.
+    app.toggle_include("1")
+    app.export_video_name.set(scan.videos[1].path.name); app.choose_export_video()
+    wait_for_preview()
+    assert app.preview_source.size == (640, 320)
+    assert app.crop_choice == custom
+    assert len(app.export_video_combo.cget("values")) == 2
+    app.export_video_name.set(chosen); app.choose_export_video(); wait_for_preview()
+    app.toggle_include("1")
+    assert app.included_videos == {chosen} and app.crop_choice == custom
     app.preview_cancel.set()
     for callback in root.tk.call("after", "info"):
         root.after_cancel(callback)
@@ -155,6 +167,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
               "report_file": str(export_report_path(result)),
               "checks": ["Tk and packaged icon", "recording date/time/per-file best-lap selection table",
                          "checked-file-only cropped and composited export preview",
+                         "one shared crop across selected videos and newly included previews",
                          "separate GoPro SD card with nested DCIM folder", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor",
                          ("full saved scene overlay" if scene_path.suffix.lower() == ".gvscene"
