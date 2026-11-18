@@ -123,9 +123,10 @@ def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, sce
 
 
 class CropEditor(tk.Toplevel):
-    def __init__(self, parent, prepared: FramingPreview, choice: Choice, apply, unavailable=""):
+    def __init__(self, parent, prepared: FramingPreview, choice: Choice, apply, unavailable="", *, export_count=0):
         super().__init__(parent)
-        self.title("Frame & preview — " + prepared.video.path.name)
+        title = "Confirm export framing" if export_count else "Frame & preview"
+        self.title(title + " — " + prepared.video.path.name)
         self.transient(parent)
         width = min(1180, self.winfo_screenwidth() - 80)
         height = min(780, self.winfo_screenheight() - 100)
@@ -144,7 +145,11 @@ class CropEditor(tk.Toplevel):
         self.input_size = None
         self.input_box = None
         body = ttk.Frame(self, padding=18); body.pack(fill="both", expand=True)
-        self.scope_label = ttk.Label(body, text=prepared.video.path.name + " · Crop applies to all selected videos",
+        scope = "Crop applies to all selected videos"
+        if export_count:
+            scope = (f"{prepared.rotation}° rotation · One video" if export_count == 1 else
+                     f"{prepared.rotation}° rotation for this preview · Crop applies to {export_count} videos")
+        self.scope_label = ttk.Label(body, text=prepared.video.path.name + " · " + scope,
                                      font=("Segoe UI", 11, "bold"), wraplength=1050)
         self.scope_label.pack(anchor="w", pady=(0,10))
         toolbar = ttk.Frame(body); toolbar.pack(fill="x", pady=(0, 12))
@@ -179,7 +184,8 @@ class CropEditor(tk.Toplevel):
         self.unavailable = unavailable or "Keep the original VBOX video beside the VBOX runs to enable cropping."
         actions = ttk.Frame(body); actions.pack(fill="x")
         ttk.Button(actions, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(actions, text="Apply to selected videos", style="Accent.TButton", command=self.commit).pack(side="right", padx=(0, 8))
+        action = "Confirm & create files" if export_count else "Apply to selected videos"
+        ttk.Button(actions, text=action, style="Accent.TButton", command=self.commit).pack(side="right", padx=(0, 8))
         self.bind("<Escape>", lambda e: self.destroy())
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.grab_set()
@@ -188,8 +194,7 @@ class CropEditor(tk.Toplevel):
     def choice(self):
         if not self.enabled.get():
             return "none"
-        crop = self.prepared.crop(self.position)
-        return self.at(crop.x, crop.y)
+        return self.position.copy() if isinstance(self.position, dict) else self.position
 
     def at(self, x, y):
         p = self.prepared
@@ -277,8 +282,9 @@ class CropEditor(tk.Toplevel):
         self.redraw()
 
     def commit(self):
-        self.apply_callback(self.choice())
+        choice = self.choice()
         self.destroy()
+        self.apply_callback(choice)
 
     def destroy(self):
         if self.pending is not None:

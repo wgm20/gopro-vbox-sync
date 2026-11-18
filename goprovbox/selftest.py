@@ -9,7 +9,7 @@ import tkinter as tk
 
 from . import __version__
 from .distribution import asset, uninstall_command
-from .engine import scan_folder, export
+from .engine import scan_folder
 from .reports import export_report_path
 from .media import probe, run, executable
 from .vbo import read_vbo, write_vbo
@@ -114,10 +114,6 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     app.export_video_name.set(chosen); app.choose_export_video(); wait_for_preview()
     app.toggle_include("1")
     assert app.included_videos == {chosen} and app.crop_choice == custom
-    app.preview_cancel.set()
-    for callback in root.tk.call("after", "info"):
-        root.after_cancel(callback)
-    root.destroy(); app.temporary.cleanup()
     # Exercise the packaged app at the reported long-path boundary, including
     # WAV preparation, muxing, logs, previews and the final folder rename.
     output_parent = (destination / "Race day recordings").resolve()
@@ -125,9 +121,30 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     output = output_parent / "GoPro Circuit Tools Overlay Cropped Matched"
     legacy_audio = output_parent / ("." + output.name + ".working-12345678") / "GoPro_GX01D001_0001.audio.wav"
     assert len(str(legacy_audio)) >= 260
-    result = export(scan, output, include_videos={chosen},
-                    encoder="software", telemetry_overlay=True, crops={chosen: custom},
-                    overlay_scene=scene_path, overlay_mode="full" if scene_path else "four")
+    from .framing import CropEditor
+    app.output.set(str(output))
+    wait_for_preview()
+    assert app.overlay_preview.cget("style") == "Framing.TButton"
+    app.create.invoke()
+    editor = None
+    deadline = time.monotonic() + 30
+    while editor is None and time.monotonic() < deadline:
+        root.update()
+        editor = next((w for w in root.winfo_children() if isinstance(w, CropEditor)), None)
+        time.sleep(.02)
+    assert editor is not None and editor.title().startswith("Confirm export framing")
+    assert editor.choice() == custom and not output.exists()
+    editor.commit()
+    deadline = time.monotonic() + 90
+    while app.result is None and time.monotonic() < deadline:
+        root.update()
+        time.sleep(.02)
+    assert app.result is not None, "The confirmed export did not finish"
+    result = app.result
+    app.preview_cancel.set()
+    for callback in root.tk.call("after", "info"):
+        root.after_cancel(callback)
+    root.destroy(); app.temporary.cleanup()
     for path in result.iterdir():
         assert len(str(path)) < 260, path.name
         with path.open("rb") as handle:
@@ -162,7 +179,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
         correlation = sum(a*b for a, b in zip(original, output)) / math.sqrt(
             sum(a*a for a in original)*sum(b*b for b in output))
         assert correlation > .98, (point, correlation)
-    from .framing import CropEditor, prepare_preview
+    from .framing import prepare_preview
     prepared = prepare_preview(scan.videos[0], [m for m in scan.matches if m.video.path.name == chosen],
                                0, 1920, scan.crop_references[chosen].aspect,
                                "full" if scene_path else "four", str(scene_path) if scene_path else "",
@@ -185,6 +202,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
               "checks": ["Tk and packaged icon", "recording date/time/per-file best-lap selection table",
                          "checked-file-only cropped and composited export preview",
                          "one shared crop across selected videos and newly included previews",
+                         "Create files previews framing and waits for confirmation before export",
                          "separate GoPro SD card with nested DCIM folder", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor",
                          ("full saved scene overlay" if scene_path.suffix.lower() == ".gvscene"

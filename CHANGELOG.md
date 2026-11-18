@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b21 — released 2026-11-18
+
+- **Create files** opens a framing review with the source picture and the finished output side by side. Adjust the crop or choose **Confirm & create files** to begin. Cancel returns to the selection.
+- **Frame & preview** turns green when the selected picture is ready to review. New scans reuse the last applied crop position and preview rotation. A first installation starts with the full, upright picture.
+- When a selected video lacks the reference needed for cropping, the confirmation shows the full frame and explains which recording needs its original VBOX video.
+
 ## 1.6.0b20 — released 2026-11-18
 
 - After a scan, **Fastest filmed lap** ticks the camera files needed for the quickest complete filmed lap across all runs. It includes both chapters for a split lap and accounts for the selected padding. Choose another lap or change the ticks yourself.

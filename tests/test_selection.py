@@ -53,7 +53,7 @@ class SelectionTests(ExportTestCase):
         from goprovbox.gui import App
         self.scan.crop_references = {'GX010002.mp4': Mock()}
         app = self.gui_export_app({'GX010002.mp4'}, 'top')
-        App.begin_export(app)
+        App.export_confirmed_framing(app)
         job = app.worker.call_args.args[0]
         # A pending job owns a snapshot even if UI state is subsequently reset.
         app.included_videos.clear()
@@ -116,7 +116,7 @@ class SelectionTests(ExportTestCase):
         app = self.gui_export_app(included, choice)
         app.selected_video.return_value = excluded
         app.audio_source.get.return_value = 'GoPro'
-        App.begin_export(app)
+        App.export_confirmed_framing(app)
         job = app.worker.call_args.args[0]
         choice['y'] = 1.0
         app.crop_choice = 'none'

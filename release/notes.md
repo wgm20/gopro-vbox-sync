@@ -1,11 +1,10 @@
-# GoPro VBOX Sync 1.6.0b20 — 18 November 2026
+# GoPro VBOX Sync 1.6.0b21 — 18 November 2026
 
-- After a scan, **Fastest filmed lap** ticks the camera files needed for the quickest complete filmed lap across all runs. It includes both chapters for a split lap and accounts for the selected padding. Choose another lap or change the ticks yourself.
-- The table starts with **Include** and shows **Start (local)**. The export summary identifies the chosen run, lap and time.
-- Empty recording fields explain which folders to choose. The **Scene file** field names the .VVHSN and .gvscene formats. **Export folder** identifies the destination.
-- Includes the adaptive built-in dashboard from 1.6.0b19. Leave Scene blank in Driving data to show the gauges available in the recording.
+- **Create files** opens a framing review with the source picture and the finished output side by side. Adjust the crop or choose **Confirm & create files** to begin. Cancel returns to the selection.
+- **Frame & preview** turns green when the selected picture is ready to review. New scans reuse the last applied crop position and preview rotation. A first installation starts with the full, upright picture.
+- When a selected video lacks the reference needed for cropping, the confirmation shows the full frame and explains which recording needs its original VBOX video.
 
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b20-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b21-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved, and the exported MP4 also plays in ordinary video players.
 

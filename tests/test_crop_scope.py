@@ -77,7 +77,7 @@ class CropScopeTests(unittest.TestCase):
     def open_editor(self, row):
         prepared = FramingPreview(self.clips[row], 0, Fraction(16, 9), Image.new('RGB', (160, 160)),
                                   {False: (160, 160), True: (160, 90)}, {}, 1)
-        self.app.events.put(('framing_preview', (prepared, deepcopy(self.app.crop_choice), self.app.scan)))
+        self.app.events.put(('framing_preview', (prepared, deepcopy(self.app.crop_choice), self.app.scan, False, '')))
         self.app.poll()
         editors = [window for window in self.root.winfo_children() if isinstance(window, CropEditor)]
         self.assertEqual(len(editors), 1)
@@ -101,6 +101,85 @@ class CropScopeTests(unittest.TestCase):
         editor.position = {'mode': 'custom', 'x': .5, 'y': .2}
         editor.commit()
         return deepcopy(self.app.crop_choice)
+
+    def open_confirmation(self):
+        app = self.app
+        def prepare(clip, matches, rotation, size, aspect, mode, path, destination, cancel, **kwargs):
+            return FramingPreview(clip, rotation, aspect, Image.new('RGB', (160, 160)),
+                                  {False: (160, 160), True: (160, 90)}, {}, 1)
+        with patch('goprovbox.framing.prepare_preview', side_effect=prepare):
+            app.create.invoke()
+            for thread in threading.enumerate():
+                if thread.ident not in self.initial_threads:
+                    thread.join(timeout=2)
+            app.poll()
+        dialogs = [w for w in self.root.winfo_children() if isinstance(w, CropEditor)]
+        self.assertEqual(len(dialogs), 1)
+        self.assertIn('Confirm export framing', dialogs[0].title())
+        return dialogs[0]
+
+    def test_create_requires_confirmation_and_only_remembers_an_accepted_choice(self):
+        app = self.app
+        for thread in threading.enumerate():
+            if thread.ident not in self.initial_threads:
+                thread.join(timeout=2)
+        app.poll()
+        self.assertEqual(app.overlay_preview.cget('style'), 'Framing.TButton')
+        app.rotation.set('90° clockwise'); app.change_rotation()
+        choice = {'mode': 'custom', 'x': .5, 'y': .173}
+        with patch.object(app, 'export_confirmed_framing') as start:
+            editor = self.open_confirmation()
+            editor.enabled.set(True); editor.position = choice.copy(); editor.destroy()
+            self.assertEqual(app.crop_choice, 'none')
+            self.assertEqual(app.last_rotation, 0)
+            start.assert_not_called()
+            editor = self.open_confirmation()
+            editor.enabled.set(True); editor.position = choice.copy()
+            self.assertEqual(editor.choice(), choice)
+            start.assert_not_called()
+            editor.commit()
+            start.assert_called_once_with()
+        app.save_preferences()
+        prefs = json.loads(app.preferences.read_text())
+        self.assertEqual((prefs['last_crop'], prefs['last_rotation']), (choice, 90))
+        for thread in threading.enumerate():
+            if thread.ident not in self.initial_threads:
+                thread.join(timeout=2)
+        app.poll()
+        self.assertEqual(app.create.cget('style'), 'Accent.TButton')
+        self.assertEqual(app.overlay_preview.cget('style'), 'TButton')
+        app.set_busy(True)
+        self.assertTrue(app.overlay_preview.instate(['disabled']))
+        self.assertEqual(app.overlay_preview.cget('style'), 'TButton')
+        app.set_busy(False)
+        app.toggle_include('1')
+        self.assertEqual(app.overlay_preview.cget('style'), 'Framing.TButton')
+        app.events.put(('scan', app.scan)); app.poll()
+        self.assertEqual(app.crop_choice, choice)
+        self.assertEqual(set(app.rotations.values()), {90})
+        pending = set(self.root.tk.call('after', 'info'))
+        reopened = tk.Toplevel(self.root)
+        restored = App(reopened)
+        self.assertEqual((restored.last_crop, restored.last_rotation), (choice, 90))
+        for callback in set(self.root.tk.call('after', 'info')) - pending:
+            reopened.after_cancel(callback)
+        restored.temporary.cleanup()
+        reopened.destroy()
+
+    def test_confirmation_offers_full_frame_when_another_selected_file_cannot_crop(self):
+        self.app.toggle_include('1')
+        self.app.scan.crop_references.pop(self.clips[1].path.name)
+        choice = {'mode': 'custom', 'x': .5, 'y': .2}
+        self.app.last_crop = self.app.crop_choice = choice
+        with patch.object(self.app, 'export_confirmed_framing') as start:
+            editor = self.open_confirmation()
+            self.assertTrue(editor.crop_toggle.instate(['disabled']))
+            self.assertIn(self.clips[1].path.name, editor.unavailable)
+            self.assertEqual(editor.choice(), 'none')
+            editor.commit()
+            start.assert_called_once()
+        self.assertEqual(self.app.crop_choice, 'none')
+        self.assertEqual(self.app.last_crop, choice)
 
     def test_excluded_highlight_does_not_change_the_export_preview_or_frame_target(self):
         self.select(1)
@@ -257,7 +336,7 @@ class CropScopeTests(unittest.TestCase):
         self.app.sort_rows('video', True)
         self.select(0)
         with patch('goprovbox.gui.messagebox.askyesno') as confirm, patch.object(self.app, 'worker') as worker:
-            self.app.begin_export()
+            self.app.export_confirmed_framing()
         confirm.assert_not_called()
         self.app.crop_choice['y'] = .8
         self.app.included_videos.clear()
@@ -292,7 +371,7 @@ class CropScopeTests(unittest.TestCase):
         for clip in self.clips:
             self.assertIsNone(self.app.video_crop(clip, 0))
         with patch('goprovbox.gui.messagebox.askyesno') as confirm, patch.object(self.app, 'worker') as worker:
-            self.app.begin_export()
+            self.app.export_confirmed_framing()
         confirm.assert_not_called()
         with patch('goprovbox.gui.export', return_value=self.folder / 'out') as dispatch:
             worker.call_args.args[0]()
@@ -327,7 +406,7 @@ class CropScopeTests(unittest.TestCase):
         worker.assert_not_called()
         self.assertEqual(self.app.crop_choice, choice)
         with patch('goprovbox.gui.messagebox.showerror') as error, patch.object(self.app, 'worker') as worker:
-            self.app.begin_export()
+            self.app.export_confirmed_framing()
         error.assert_called_once()
         self.assertIn(self.clips[1].path.name, error.call_args.args[1])
         worker.assert_not_called()

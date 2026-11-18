@@ -19,7 +19,8 @@ from . import __version__
 from .engine import scan_folder, export, safe_stem
 from .lapexport import filmed_laps
 from .reports import export_report_path
-from .crop import rectangle
+from .crop import rectangle, validate_choice
+from .gpmf import TelemetryError
 from .runinfo import video_run_info
 from .selection import lap_time, moment, row_values, recording_details
 from .distribution import (asset, data_directory, tools_ready, download_tools, copy_demo,
@@ -86,6 +87,7 @@ class App:
         self.preview_display_size = None
         self.preview_cancel = Event()
         self.preview_request = None
+        self.reviewed_preview = None
         self.preview_video = None
         self.selection_data = {}
         self.sort_column = "start"
@@ -96,6 +98,14 @@ class App:
             prefs = json.loads(self.preferences.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             prefs = {}
+        self.last_crop = prefs.get("last_crop", "none")
+        try:
+            validate_choice(self.last_crop)
+        except (TelemetryError, OverflowError):
+            self.last_crop = "none"
+        self.last_rotation = prefs.get("last_rotation", 0)
+        if type(self.last_rotation) is not int or self.last_rotation not in ROTATIONS.values():
+            self.last_rotation = 0
         self.welcomed = bool(prefs.get("welcomed", False))
         self.folder = tk.StringVar(value=str(folder or prefs.get("folder", "")))
         saved_gopro = "" if prefs.get("same_gopro_folder", False) else str(prefs.get("gopro_folder") or "")
@@ -148,6 +158,8 @@ class App:
         style.configure("Treeview", rowheight=32, indent=0, background="white", fieldbackground="white")
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"), padding=6)
         style.map("Treeview", background=[("selected", "#d1ebe5")], foreground=[("selected", "#15392f")])
+        style.configure("Framing.TButton", background="#176b42", foreground="white")
+        style.map("Framing.TButton", background=[("active", "#105333")])
         style.configure("TProgressbar", background="#078b7e", troughcolor="#dce3e9")
         header = tk.Frame(root, bg="#172d42", padx=22, pady=10); header.pack(fill="x")
         with Image.open(asset("brand.png")) as artwork:
@@ -228,9 +240,10 @@ class App:
         self.preview_label.bind("<Configure>", self.resize_preview)
         rotationrow = ttk.Frame(preview_controls); rotationrow.pack(fill="x", pady=(8,0))
         self.rotate_combo = ttk.Combobox(rotationrow, textvariable=self.rotation, values=list(ROTATIONS), state="disabled", width=22)
-        self.rotate_combo.pack(side="left",fill="x",expand=True); self.rotate_combo.bind("<<ComboboxSelected>>", self.change_rotation)
+        self.rotate_combo.bind("<<ComboboxSelected>>", self.change_rotation)
         self.overlay_preview = ttk.Button(rotationrow, text="Frame & preview…", command=self.preview_overlay, state="disabled")
-        self.overlay_preview.pack(side="left",padx=(8,0))
+        self.overlay_preview.pack(side="right", padx=(8,0))
+        self.rotate_combo.pack(side="left", fill="x", expand=True)
         ttk.Label(preview_controls, textvariable=self.crop_note, wraplength=360).pack(anchor="w", pady=(4,0))
         ttk.Label(preview_controls, textvariable=self.run_detail, wraplength=360, justify="left").pack(anchor="w", pady=(4,0))
         self.scenerow = ttk.Frame(footer)
@@ -460,7 +473,7 @@ class App:
 
     def clear_export_preview(self):
         self.preview_cancel.set(); self.preview_generation += 1
-        self.preview_request = None; self.preview_video = None
+        self.preview_request = None; self.reviewed_preview = None; self.preview_video = None
         self.export_video_name.set("")
         self.export_video_combo.configure(values=(), state="disabled")
         self.preview_source = None; self.preview_display_size = None
@@ -560,8 +573,6 @@ class App:
     def source_changed(self, *_):
         if self.busy:
             return
-        if self.crop_choice != "none":
-            self.log("Recording sources or scan options changed; saved framing was cleared.")
         self.scan = None; self.result = None
         self.explicit_lap = None; self.update_selection_summary()
         self.selection_data.clear(); self.run_detail.set("")
@@ -726,7 +737,7 @@ class App:
                     return video.clock.media_time((span.start + span.end) / 2)
         return None
 
-    def preview_overlay(self):
+    def preview_overlay(self, *, confirm_export=False):
         video = self.export_video()
         if not video or self.busy:
             return
@@ -738,7 +749,14 @@ class App:
         scan, size = self.scan, QUALITY[self.quality.get()]
         choice = deepcopy(self.crop_choice)
         ref = scan.crop_references.get(video.path.name)
-        if choice != "none" and ref is None:
+        unavailable = scan.crop_errors.get(video.path.name, "")
+        if confirm_export:
+            missing = [v.path.name for v in self.export_candidates() if v.path.name not in scan.crop_references]
+            if missing:
+                ref, choice = None, "none"
+                missing_files = missing[0] if len(missing) == 1 else f"{missing[0]} and {len(missing) - 1} more"
+                unavailable = "Full frame will be exported. Cropping needs the original VBOX video for " + missing_files + "."
+        elif choice != "none" and ref is None:
             messagebox.showerror("Crop unavailable",
                 "Keep the original VBOX video beside the VBOX runs, then scan again to adjust this crop.\n\n"
                 "You can also choose another Preview video with cropping available to change or turn off the crop for all selected videos.",
@@ -758,7 +776,7 @@ class App:
                 raise ValueError("This video has no matching VBOX data")
             prepared = prepare_preview(video, matches, rotation, size, ref.aspect if ref else None,
                                        mode, path, destination, self.cancel, **timing)
-            self.events.put(("framing_preview", (prepared, choice, scan)))
+            self.events.put(("framing_preview", (prepared, choice, scan, confirm_export, unavailable)))
         self.worker(work)
 
     def choose_folder(self):
@@ -776,6 +794,16 @@ class App:
         value = filedialog.askdirectory(title="Choose where to place the new output folder", initialdir=self.folder.get() or None)
         if value:
             self.output.set(str(Path(value) / self.output_name()))
+
+    def framing_scope(self):
+        return tuple((v.path.name, self.rotations.get(v.path.name, 0)) for v in self.export_candidates())
+
+    def update_action_styles(self):
+        ready = not self.busy and self.preview_source is not None and self.preview_request is not None
+        review_next = ready and (self.preview_request, self.framing_scope()) != self.reviewed_preview
+        self.overlay_preview.configure(style="Framing.TButton" if review_next else "TButton")
+        self.create.configure(style="Accent.TButton" if ready and not review_next else "TButton")
+        self.scan_button.configure(style="TButton" if self.scan and self.scan.matches else "Accent.TButton")
 
     def set_busy(self, busy):
         self.busy = busy
@@ -801,6 +829,7 @@ class App:
         self.create.configure(state="normal" if target and not busy else "disabled")
         self.stop.configure(state="normal" if busy else "disabled")
         self.tree.configure(selectmode="none" if busy else "browse")
+        self.update_action_styles()
 
     def worker(self, function):
         self.cancel.clear(); self.set_busy(True)
@@ -833,8 +862,6 @@ class App:
         if not gopro_folder.is_dir():
             messagebox.showerror("Choose GoPro videos", "Choose the SD card or folder with your GoPro videos."); return
         recursive_gopro = self.recursive_gopro.get()
-        if self.crop_choice != "none":
-            self.log("Starting a new scan; saved framing was cleared. Set framing again after scanning.")
         self.result = None; self.rotations = {}; self.crop_choice = "none"; self.progress["value"] = 0
         self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
@@ -915,6 +942,7 @@ class App:
         self.preview_title.set("Export preview")
         self.preview_label.configure(image="", text="Rendering export preview…")
         self.preview_source = None; self.preview_display_size = None
+        self.update_action_styles()
         events = self.events
         timing = {"seconds": seconds} if seconds is not None else {}
         def work(cache=self.temporary):
@@ -935,7 +963,34 @@ class App:
                     events.put(("log", f"{video.path.name}: export preview unavailable: {exc}"))
         Thread(target=work, daemon=True).start()
 
+    def show_framing_review(self, prepared, choice, scan, confirm_export, unavailable):
+        from .framing import CropEditor
+        if self.closing or self.cancel.is_set() or self.scan is not scan or self.export_video() is not prepared.video:
+            return
+        scope = self.framing_scope()
+
+        def apply(choice):
+            if self.scan is not scan or self.export_video() is not prepared.video or self.framing_scope() != scope:
+                self.log("Framing was not applied because the export selection changed.")
+                return
+            self.crop_choice = deepcopy(choice)
+            if prepared.aspect is not None:
+                self.last_crop = deepcopy(choice)
+            self.last_rotation = prepared.rotation
+            self.save_preferences()
+            self.quality_changed()
+            self.reviewed_preview = self.preview_request, scope
+            self.update_action_styles()
+            if confirm_export:
+                self.export_confirmed_framing()
+
+        CropEditor(self.root, prepared, choice, apply, unavailable, export_count=len(scope) if confirm_export else 0)
+        self.status.set("Preview ready.")
+
     def begin_export(self):
+        self.preview_overlay(confirm_export=True)
+
+    def export_confirmed_framing(self):
         if self.scan is None:
             return
         scan, output = self.scan, Path(self.output.get())
@@ -984,24 +1039,7 @@ class App:
                 if kind == "log":
                     self.log(value)
                 elif kind == "framing_preview":
-                    prepared, choice, scan = value
-                    if (not self.closing and not self.cancel.is_set() and self.scan is scan
-                            and prepared.video is self.export_video()):
-                        from .framing import CropEditor
-                        def apply(choice, video=prepared.video, rotation=prepared.rotation):
-                            if (self.scan is not scan or video is not self.export_video()
-                                    or self.rotations.get(video.path.name, 0) != rotation):
-                                self.log("Framing was not applied because the export selection changed.")
-                                return
-                            self.crop_choice = deepcopy(choice)
-                            crop_state = "no crop" if choice == "none" else "crop enabled"
-                            self.log(f"Crop applied to all selected videos — {crop_state}.")
-                            self.preview_request = None
-                            self.quality_changed()
-                            self.load_preview(video, rotation)
-                        CropEditor(self.root, prepared, choice, apply,
-                                   scan.crop_errors.get(prepared.video.path.name, ""))
-                    self.status.set("Preview ready.")
+                    self.show_framing_review(*value)
                 elif kind == "progress":
                     self.progress["value"] = value * 100
                     self.status.set(f"Preparing and verifying files · {value:.0%}")
@@ -1020,17 +1058,23 @@ class App:
                         heading = f"Export preview · {output_size[0]} × {output_size[1]}"
                         self.preview_title.set(heading + "\n" + caption if caption else heading)
                         self.resize_preview()
+                        self.update_action_styles()
                 elif kind == "preview_failed":
                     generation, message = value if isinstance(value, tuple) else (value, "Select the export video again to retry.")
                     if generation == self.preview_generation and self.export_video():
                         self.preview_source = None; self.preview_display_size = None
                         self.preview_request = None
+                        self.update_action_styles()
                         self.preview_title.set("Export preview unavailable")
                         self.preview_label.configure(image="", text="Export preview unavailable.\n" + message[:180])
                 elif kind == "scan":
                     self.scan = value
                     self.auto_lap_selection = True
                     self.update_selection_summary()
+                    self.rotations = {v.path.name: self.last_rotation for v in value.videos}
+                    candidates = self.export_candidates()
+                    self.crop_choice = (deepcopy(self.last_crop) if candidates and
+                                        all(v.path.name in value.crop_references for v in candidates) else "none")
                     self.refresh_rows()
                     self.quality_changed()
                     for err in value.errors:
@@ -1082,6 +1126,7 @@ class App:
                                                     "prefer_lap": self.prefer_lap, "lap_padding": self.lap_padding.get(),
                                                     "overlap_only": self.overlap_only.get(),
                                                     "audio_source": SOUND[self.audio_source.get()],
+                                                    "last_crop": self.last_crop, "last_rotation": self.last_rotation,
                                                     "welcomed": self.welcomed}), encoding="utf-8")
         except OSError:
             pass
