@@ -14,12 +14,20 @@ def summarize_run(vbo) -> dict:
     result = {"name": vbo.path.name, "path": str(vbo.path),
               "utc_start": vbo.rows[0].utc if vbo.rows else None,
               "utc_end": vbo.rows[-1].utc if vbo.rows else None,
-              "complete_laps": 0, "laps": [], "fastest_lap": None, "unavailable_reason": ""}
+              "complete_laps": 0, "laps": [], "timing_intervals": [], "fastest_lap": None, "unavailable_reason": ""}
     if not any(re.match(r"^Start\s", line, re.I) for line in vbo.preamble):
         result["unavailable_reason"] = "No start/finish line is recorded."
         return result
     try:
         session = Session(vbo)
+        # An elapsed timer starts at a crossing, including on a partly filmed lap.
+        # A telemetry gap invalidates it until another observed crossing.
+        for index, start in enumerate(session.crossings):
+            end = session.crossings[index + 1] if index + 1 < len(session.crossings) else session.times[-1]
+            gap = bisect_right(session.gaps, start)
+            if gap < len(session.gaps) and session.gaps[gap] <= end:
+                end = session.times[bisect_left(session.times, session.gaps[gap]) - 1]
+            result["timing_intervals"].append((start, end))
         result["complete_laps"] = len(session.laps)
         result["laps"] = [{"number": lap.number, "duration_seconds": lap.duration,
                            "utc_start": lap.start, "utc_end": lap.end} for lap in session.laps]

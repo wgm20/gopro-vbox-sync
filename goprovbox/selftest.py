@@ -28,20 +28,31 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     dcim.mkdir(parents=True)
     for path in source.glob("*.MP4"):
         path.rename(dcim / path.name)
+    practice = read_vbo(source / "VBOX0001.vbo")
     if scene_path is not None:
-        # This is a copied synthetic practice fixture, never a user's VBO.
         # The saved test scene also displays a CAN acceleration channel.
-        practice = read_vbo(source / "VBOX0001.vbo")
         practice.columns.append("acceleration")
         practice.preamble.insert(practice.preamble.index("[channel units]") - 1, "Acceleration")
         practice.preamble.insert(practice.preamble.index("[comments]") - 1, "g")
         practice.preamble[practice.preamble.index("[column names]") + 1] += " Acceleration"
         for row in practice.rows:
             row.values.append("0")
-        write_vbo(practice, practice.rows,
-                  [float(row.values[practice.index("avitime")]) / 1000 for row in practice.rows],
-                  "VBOX0001_", practice.path,
-                  [int(row.values[practice.index("avifileindex")]) for row in practice.rows])
+    else:
+        # Exercise a recording with no brake sensor in the installed application.
+        brake_index = practice.index("brake")
+        practice.preamble.remove("Brake")
+        practice.preamble.remove("psi")
+        header = practice.preamble.index("[column names]") + 1
+        columns = practice.preamble[header].split()
+        columns.pop(brake_index)
+        practice.preamble[header] = " ".join(columns)
+        practice.columns.pop(brake_index)
+        for row in practice.rows:
+            row.values.pop(brake_index)
+    write_vbo(practice, practice.rows,
+              [float(row.values[practice.index("avitime")]) / 1000 for row in practice.rows],
+              "VBOX0001_", practice.path,
+              [int(row.values[practice.index("avifileindex")]) for row in practice.rows])
     # Synthetic original-recorder video supplies a different display shape so
     # the frozen-app check exercises cropping and replacement of GoPro sound.
     run([executable("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", "color=black:s=640x320:r=30",
@@ -88,7 +99,10 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     assert app.export_video().path.name == chosen
     assert tuple(app.export_video_combo.cget("values")) == (chosen,)
     assert app.preview_source.size == (640, 320)
-    assert app.preview_title.get() == "Export preview · 640 × 320"
+    expected_title = "Export preview · 640 × 320"
+    if scene_path is None:
+        expected_title += "\nSpeed · RPM · Throttle"
+    assert app.preview_title.get() == expected_title, app.preview_title.get()
     # A clip ticked after framing inherits the same crop, including its preview.
     app.toggle_include("1")
     app.export_video_name.set(scan.videos[1].path.name); app.choose_export_video()
@@ -124,6 +138,8 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
     assert probe(videos[0])["streams"][0]["width"] == 640
     assert probe(videos[0])["streams"][0]["height"] == 320
     exported = json.loads(export_report_path(result, "report.json").read_text(encoding="utf-8"))
+    if scene_path is None:
+        assert exported["settings"]["overlay"]["gauges_by_run"][practice.path.name] == ["Speed", "RPM", "Throttle"]
     assert exported["settings"]["overlap_only"]
     assert exported["media"][0]["range"]["source_start_seconds"] == 2
     assert exported["media"][0]["verification"]["frames"] == "300"
@@ -171,7 +187,7 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
                          "separate GoPro SD card with nested DCIM folder", "GPS timing", "upright metadata", "partial overlaps",
                          "selected video only", "overlap-only trim and rebased VBOX times", "custom VBOX crop and interactive editor",
                          ("full saved scene overlay" if scene_path.suffix.lower() == ".gvscene"
-                          else "full VVHSN scene import and overlay") if scene_path else "four-channel overlay",
+                          else "full VVHSN scene import and overlay") if scene_path else "built-in dashboard with a missing brake sensor",
                          "encoded video and VBO verification",
                          "VBOX sound and decoded alignment at both ends", "long output folder with short temporary paths",
                          "MP4 and VBO only in output; report stored separately", "offline help"],

@@ -25,6 +25,7 @@ class FramingPreview:
     sizes: dict[bool, tuple[int, int]]
     overlays: dict[bool, Image.Image]
     seconds: float
+    dashboard_caption: str = ""
 
     def crop(self, choice):
         return rectangle(self.video.width, self.video.height, self.rotation, self.aspect, choice)
@@ -43,9 +44,9 @@ class FramingPreview:
         return frame
 
 
-def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path, destination, cancel, seconds=None):
+def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path, destination, cancel, seconds=None, run_info=None):
     """Decode once; dragging reuses the source and export-sized gauge artwork."""
-    from .overlay import load_scene, Renderer
+    from .overlay import load_scene, Renderer, dashboard_labels
     if seconds is None:
         seconds = video.clock.media_time((matches[0].rows[0].utc + matches[0].rows[-1].utc) / 2) if matches else video.duration / 2
     seconds = max(0, min(seconds, max(0, video.duration - .1)))
@@ -57,21 +58,30 @@ def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path
         raise InterruptedError("Cancelled")
     scene = load_scene(Path(scene_path), mode=mode) if scene_path else None
     sizes, overlays = {}, {}
+    caption = ""
     for enabled in ((False, True) if aspect else (False,)):
         crop = rectangle(video.width, video.height, rotation, aspect, "centre") if enabled else None
         w, h = sizes[enabled] = dimensions(video, rotation, max_size, crop)
         if mode != "none":
-            renderer = Renderer(video, matches, w, h, scene)
+            renderer = Renderer(video, matches, w, h, scene, run_info=run_info)
+            if scene is None:
+                values = renderer.timeline.at(video.clock.utc(seconds))
+                if values is None:
+                    keys = set().union(*renderer.timeline.gauges_by_run.values())
+                    labels = dashboard_labels(keys)
+                    caption = (" · ".join(labels) + " (gap in data here)") if labels else "No supported gauges"
+                else:
+                    caption = " · ".join(dashboard_labels(values)) or "No supported gauges"
             layer = Image.new("RGBA", (w, h))
             layer.alpha_composite(renderer.frame(seconds), renderer.position)
             overlays[enabled] = layer
         if cancel.is_set():
             raise InterruptedError("Cancelled")
-    return FramingPreview(video, rotation, aspect, source, sizes, overlays, seconds)
+    return FramingPreview(video, rotation, aspect, source, sizes, overlays, seconds, caption)
 
 
 def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, scene_path,
-                           destination, cancel, choice, seconds=None):
+                           destination, cancel, choice, seconds=None, *, run_info=None, describe_dashboard=None):
     """Save the cropped, composited export still and return its pixel size.
 
     Keep the decoded source separate from the published preview so a failed or
@@ -93,9 +103,12 @@ def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, sce
     destination.parent.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix=".output-preview-", dir=destination.parent) as temporary:
         temporary = Path(temporary)
+        options = {"run_info": run_info} if run_info is not None else {}
+        if seconds is not None:
+            options["seconds"] = seconds
         prepared = prepare_preview(video, matches, rotation, max_size,
                                    aspect if crop is not None else None, mode, scene_path,
-                                   temporary / "source.png", cancel, **({"seconds": seconds} if seconds is not None else {}))
+                                   temporary / "source.png", cancel, **options)
         frame = prepared.output(choice, size).convert("RGB")
         if cancel.is_set():
             raise InterruptedError("Cancelled")
@@ -104,6 +117,8 @@ def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, sce
         if cancel.is_set():
             raise InterruptedError("Cancelled")
         rendered.replace(destination)
+        if describe_dashboard is not None:
+            describe_dashboard(prepared.dashboard_caption)
     return size
 
 

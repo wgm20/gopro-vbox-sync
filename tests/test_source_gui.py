@@ -126,14 +126,19 @@ class SourcePickerTests(unittest.TestCase):
                      app.scan_button)
         for current, following in zip(tab_order, tab_order[1:]):
             self.assertEqual(current.tk_focusNext(), following)
-        for full_scene in (False, True):
-            with self.subTest(full_scene=full_scene):
-                if full_scene:
-                    app.overlay_mode.set("Full scene · no rear camera"); app.overlay_changed()
-                    app.crop_note.set("VBOX 16:9 · no crop")
-                    app.run_detail.set("Recorded 30 Oct 2026, 09:20:10\n"
-                                       "Run best 1:02.440 · VBOX0001.vbo\n"
-                                       "★ This clip has fastest-lap footage")
+        for mode in ("Driving data", "Full scene · no rear camera"):
+            with self.subTest(mode=mode):
+                full_scene = mode.startswith("Full scene")
+                app.overlay_mode.set(mode)
+                app.overlay_changed()
+                app.crop_note.set("VBOX 16:9 · no crop")
+                app.run_detail.set("Recorded 30 Oct 2026, 09:20:10\n"
+                                   "Run best 1:02.440 · VBOX0001.vbo\n"
+                                   "★ This clip has fastest-lap footage")
+                heading = "Export preview · 1920 × 1080"
+                if not full_scene:
+                    heading += "\nSpeed · Lap time · RPM · Throttle · Brake"
+                app.preview_title.set(heading)
                 self.root.update_idletasks()
                 controls = (app.source_entry, app.browse, app.gopro_entry, app.gopro_browse,
                             app.scan_button, app.export_video_combo, app.preview_heading, app.preview_label,

@@ -31,7 +31,7 @@ def main(argv=None):
                         help="Extra seconds on each side of the lap, limited to continuous footage")
     parser.add_argument("--audio", choices=["vbox", "gopro"], default="vbox",
                         help="Sound source: VBOX by default, with GoPro sound for gaps")
-    parser.add_argument("--overlay", action="store_true", help="Burn speed, RPM, throttle and brake into encoded video")
+    parser.add_argument("--overlay", action="store_true", help="Show the gauges supported by the matched VBOX recording")
     parser.add_argument("--scene", type=Path, help="VBOX HD2 VVHSN or saved GVSCENE scene (implies --overlay)")
     parser.add_argument("--overlay-mode", choices=["four", "full"], default="four", help="four driving channels, or full scene without the rear camera")
     args = parser.parse_args(argv)

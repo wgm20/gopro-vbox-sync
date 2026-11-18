@@ -2,9 +2,9 @@
 
 **Free Windows software for pairing GoPro video with VBOX telemetry.**
 
-[**Download for Windows →**](https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b18/GoPro-VBOX-Sync-1.6.0b18-Setup.exe)
+[**Download for Windows →**](https://github.com/wgm20/gopro-vbox-sync/releases/download/v1.6.0b19/GoPro-VBOX-Sync-1.6.0b19-Setup.exe)
 
-**Version 1.6.0b18 · Released 18 November 2026.** No Python installation, payment, activation or GitHub account is needed. Visit the [download page](https://wgm20.github.io/gopro-vbox-sync/) for an overview. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b18): extract the entire folder before opening GoProVBOXSync.exe.
+**Version 1.6.0b19 · Released 18 November 2026.** No Python installation, payment, activation or GitHub account is needed. Visit the [download page](https://wgm20.github.io/gopro-vbox-sync/) for an overview. A portable ZIP is also available on the [releases page](https://github.com/wgm20/gopro-vbox-sync/releases/tag/v1.6.0b19): extract the entire folder before opening GoProVBOXSync.exe.
 
 > **Beta: Circuit Tools 3 compatibility is unresolved.** Circuit Tools can reject generated VBO files with an authenticity/checksum error and may close. Re-encoding is not a proven fix. A successful export does not guarantee Circuit Tools acceptance. Test a short run first.
 
@@ -32,7 +32,7 @@ Scan your recordings, then use **Export** beside **Create files**. **Fastest fil
 - Lets you drag a crop over the full source image while previewing the finished picture and gauges. Cropping retains the linked VBOX video’s display aspect ratio, normally 16:9. Rotation is applied first and overlays are fitted afterwards. Cropping needs compatible original VBOX videos; Details explains when it is unavailable. Uncropped output remains available. The command line retains its top, bottom and centre presets.
 - Exports only the videos you tick and links only overlapping VBOX samples.
 - Uses original VBOX sound by default, aligned using the VBO video references and GoPro GPS timestamps. Keep the original VBOX MP4 files beside the VBO files. **Options → Sound → GoPro** retains the GoPro recording; the app remembers your choice. Missing or unreliable VBOX sound falls back to GoPro sound, with the affected periods listed in the report.
-- Adds speed, RPM, throttle and brake with a built-in dashboard or a supported scene. Full scenes also support numeric arithmetic and comparisons, including gear calculated from speed and RPM. Missing inputs or telemetry gaps leave the reading unavailable.
+- The built-in dashboard fits the available speed, lap time, RPM, throttle and brake gauges. A selected supported scene supplies its own layout and channel bindings. Full scenes also support numeric arithmetic and comparisons, including gear calculated from speed and RPM. Missing inputs or telemetry gaps leave the reading unavailable.
 - Renders a supported full scene, excluding the rear camera, with proportional gauges and an undistorted track map.
 - Imports new `.VVHSN` scene files through the public scene importer in a compatible installation of VBOX Video Setup. A previously imported copy is not required.
 - Opens reusable `.gvscene` saved scene packages locally, including artwork and fonts from a previous scene import, without the VBOX Video Setup library.
@@ -47,7 +47,7 @@ Open **Options** beside **Help** for these output settings:
 | Sound: VBOX (GoPro for gaps) | Aligned original VBOX sound, with GoPro sound for uncovered periods |
 | Sound: GoPro | The GoPro camera's own sound |
 | Overlay: None | Corrected video without burned-in data |
-| Overlay: Driving data | Four channels; leave Scene blank for the built-in dashboard |
+| Overlay: Driving data | Leave Scene blank to show the gauges supported by the recording |
 | Overlay: Full scene · no rear camera | Supported gauges, artwork, map, G-ball and lap/delta displays from a selected scene |
 
 **All options encode new H.264 video with compression loss.** Full resolution does not mean copying the original compressed stream.
@@ -62,7 +62,7 @@ If different GoPro folders contain clips with the same filename, choose a more s
 
 Lap times are reconstructed from VBOX positions and the recorded start/finish line, using the same lap-timing method as the overlay. **Best in file** excludes laps split across GoPro files, incomplete laps and laps crossing telemetry gaps. If no complete lap fits within the file's GPS time range, the app shows **—** and explains why under **Options → Details…**. These times may differ from the recorder's lap results.
 
-VBO files must use the supported Video VBOX schema with existing video index/time columns. The built-in dashboard expects speed in km/h, RPM, TPS in percent and Brake in psi; it displays speed in mph. Missing required channels or incompatible units stop overlay export.
+VBO files must use the supported Video VBOX schema with existing video index/time columns. With **Driving data** selected and **Scene** blank, **Export preview** lists the available gauges. The built-in dashboard shows recorded ground speed in mph, engine speed in rpm, throttle in percent and brake pressure in psi (including pressure converted from bar, kPa or MPa). An absent channel or unrecognised unit leaves that gauge out. If there are no supported gauges, the video exports without a dashboard. The lap timer uses the full run’s recorded start/finish crossings, including when a camera chapter begins mid-lap. A gap clears the timer until the next crossing.
 
 For a full scene, choose **Options → Overlay → Full scene · no rear camera** and select a `.VVHSN` file or saved `.gvscene` package in **Scene**. The main **Export preview** updates automatically. Open **Frame & preview…** to adjust the shared crop while inspecting the chosen **Preview video**.
 

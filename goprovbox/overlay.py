@@ -7,7 +7,7 @@ remain in memory.
 """
 from __future__ import annotations
 
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path, PurePosixPath
@@ -22,9 +22,24 @@ import xml.etree.ElementTree as ET
 from PIL import Image, ImageDraw, ImageFont
 
 from .gpmf import TelemetryError
+from .selection import lap_time
 
 CHANNELS = {"speed": ("velocity",), "rpm": ("rpm", "engine_speed"),
             "throttle": ("tps", "throttle"), "brake": ("brake", "brake_pressure")}
+# Each cell occupies the same space as in the original four-gauge strip.
+# Values passed to the painter already use the displayed unit.
+DASHBOARD_GAUGES = {
+    "speed": ("Speed", "SPEED · mph", "#e4edf4", 150),
+    "lap_time": ("Lap time", "LAP TIME", "#e4edf4", None),
+    "rpm": ("RPM", "ENGINE · rpm", "#57bbf0", 10000),
+    "throttle": ("Throttle", "THROTTLE · %", "#35db94", 100),
+    "brake": ("Brake", "BRAKE · psi", "#ff626b", 600),
+}
+DASHBOARD_FACTORS = {
+    "rpm": {"rpm": 1},
+    "throttle": {"%": 1, "percent": 1},
+    "brake": {"psi": 1, "bar": 14.503773773, "kpa": 0.14503773773, "mpa": 145.03773773},
+}
 MAX_ARCHIVE = 32 * 1024 * 1024
 
 
@@ -261,60 +276,105 @@ def parse_scene(members, name="Scene", digest="", *, require_four_channels=True)
         raise TelemetryError(f"Cannot read this scene's four-channel overlay: {exc}") from exc
 
 
+def dashboard_labels(keys):
+    return [gauge[0] for key, gauge in DASHBOARD_GAUGES.items() if key in keys]
+
+
+def recorded_channel_units(vbo):
+    standard = {"sats", "time", "lat", "long", "velocity", "heading", "height", "vert-vel", "tsample",
+                "solution_type", "avifileindex", "avitime", "avisynctime"}
+    custom = [column for column in vbo.columns if column not in standard]
+    marker = next((i for i, line in enumerate(vbo.preamble) if line.strip().lower() == "[channel units]"), None)
+    units = []
+    if marker is not None:
+        for line in vbo.preamble[marker + 1:]:
+            if line.startswith("["):
+                break
+            if line.strip():
+                units.append(line.strip().lower())
+    # Built-in entries such as sampleperiod precede the ordered custom units.
+    return dict(zip(custom, units[-len(custom):])) if custom and len(units) >= len(custom) else {}
+
+
+def dashboard_bindings(vbo, units, has_speed_unit):
+    result = {}
+    if has_speed_unit and "velocity" in vbo.columns:
+        result["speed"] = {"column": "velocity", "factor": 1 / 1.609344}
+    for key, factors in DASHBOARD_FACTORS.items():
+        for column in CHANNELS[key]:
+            unit = units.get(column)
+            if unit in factors:
+                result[key] = {"column": column, "factor": factors[unit]}
+                break
+    return result
+
+
 class Timeline:
-    def __init__(self, matches, bindings):
+    def __init__(self, matches, bindings, run_info=None):
         self.segments = []
+        self.timing = []
+        self.gauges_by_run = {}
+        run_info = dict(run_info or {})
         for match in sorted(matches, key=lambda m: m.rows[0].utc):
             vbo = match.vbo
-            indices = {key: vbo.index(binding["column"]) for key, binding in bindings.items()}
-            # The velocity column in the documented VBO format is kilometres/hour.
-            if "velocity kmh" not in [p.strip().lower() for p in vbo.preamble]:
-                raise TelemetryError(f"{vbo.path.name}: overlay needs velocity kmh")
-            standard = {"sats", "time", "lat", "long", "velocity", "heading", "height", "vert-vel", "tsample",
-                        "solution_type", "avifileindex", "avitime", "avisynctime"}
-            custom = [c for c in vbo.columns if c not in standard]
-            marker = next((i for i, line in enumerate(vbo.preamble) if line.lower().strip() == "[channel units]"), None)
-            unit_lines = []
-            if marker is not None:
-                for line in vbo.preamble[marker+1:]:
-                    if line.startswith("["): break
-                    if line.strip(): unit_lines.append(line.strip().lower())
-            # Racelogic omits built-in channel units, except sampleperiod. The
-            # custom units follow in the same order as the custom columns.
-            known_units = dict(zip(custom, unit_lines[-len(custom):])) if custom and len(unit_lines) >= len(custom) else {}
-            for key in ("rpm", "throttle", "brake"):
-                if key not in bindings:
-                    continue
-                expected = bindings[key]["unit"].lower()
-                actual = known_units.get(bindings[key]["column"], "")
-                if not expected or actual != expected:
-                    raise TelemetryError(f"{vbo.path.name}: {key} unit is {actual or 'unknown'}, scene expects {expected or 'unknown'}")
+            units = recorded_channel_units(vbo)
+            has_speed_unit = any(line.strip().lower() == "velocity kmh" for line in vbo.preamble)
+            if bindings is None:
+                active = dashboard_bindings(vbo, units, has_speed_unit)
+                name = vbo.path.name
+                if "timing_intervals" not in run_info.get(name, {}):
+                    from .runinfo import summarize_run
+                    run_info[name] = summarize_run(vbo)
+                windows = [interval for interval in run_info[name]["timing_intervals"]
+                           if interval[0] <= match.rows[-1].utc and interval[1] >= match.rows[0].utc]
+                self.timing.append(windows)
+                gauges = self.gauges_by_run.setdefault(name, set())
+                gauges.update(active)
+                if windows:
+                    gauges.add("lap_time")
+            else:
+                active = bindings
+            indices = {key: vbo.index(binding["column"]) for key, binding in active.items()}
+            if bindings is not None:
+                if not has_speed_unit:
+                    raise TelemetryError(f"{vbo.path.name}: overlay needs velocity kmh")
+                for key in ("rpm", "throttle", "brake"):
+                    if key in bindings:
+                        expected = bindings[key]["unit"].lower()
+                        actual = units.get(bindings[key]["column"], "")
+                        if not expected or actual != expected:
+                            raise TelemetryError(f"{vbo.path.name}: {key} unit is {actual or 'unknown'}, scene expects {expected or 'unknown'}")
             times = [r.utc for r in match.rows]
             if self.segments and times[0] < self.segments[-1][0][-1]:
                 raise TelemetryError("Overlapping VBOX files give ambiguous overlay data for this video")
-            values = [{k: float(r.values[i]) * bindings[k]["factor"] for k, i in indices.items()} for r in match.rows]
+            values = [{k: float(r.values[i]) * active[k]["factor"] for k, i in indices.items()} for r in match.rows]
             self.segments.append((times, values))
 
     def at(self, utc):
-        for times, values in self.segments:
+        for index, (times, values) in enumerate(self.segments):
             if utc < times[0] or utc > times[-1]:
                 continue
             j = bisect_left(times, utc)
             if j < len(times) and abs(times[j] - utc) < 1e-6:
-                return values[j]
-            if j == 0 or j == len(times) or times[j] - times[j-1] > .5:
+                point = values[j]
+            elif j == 0 or j == len(times) or times[j] - times[j-1] > .5:
                 return None
-            f = (utc - times[j-1]) / (times[j] - times[j-1])
-            return {k: values[j-1][k] * (1-f) + values[j][k] * f for k in values[j]}
+            else:
+                f = (utc - times[j-1]) / (times[j] - times[j-1])
+                point = {k: values[j-1][k] * (1-f) + values[j][k] * f for k in values[j]}
+            if self.timing and (windows := self.timing[index]):
+                lap = bisect_right(windows, utc, key=lambda interval: interval[0]) - 1
+                elapsed = utc - windows[lap][0] if lap >= 0 and utc <= windows[lap][1] else None
+                return {**point, "lap_time": elapsed}
+            return point
         return None
 
 
 class FourChannelRenderer:
-    def __init__(self, video, matches, width, height, scene=None):
+    def __init__(self, video, matches, width, height, scene=None, run_info=None):
         self.video, self.scene = video, scene
-        self.bindings = scene.bindings if scene else {k: {"column": names[0], "factor": 1/1.609344 if k == "speed" else 1,
-                                                       "unit": {"speed":"mph", "rpm":"rpm", "throttle":"%", "brake":"psi"}[k]} for k, names in CHANNELS.items()}
-        self.timeline = Timeline(matches, self.bindings)
+        self.bindings = scene.bindings if scene else None
+        self.timeline = Timeline(matches, self.bindings, run_info)
         if scene:
             self.scale = min(width / scene.size[0], height / scene.size[1])
             left = min(e["pos"][0] for e in scene.elements); top = min(e["pos"][1] for e in scene.elements)
@@ -327,7 +387,8 @@ class FourChannelRenderer:
             self.position = (round(left*self.scale), round(top*self.scale))
         else:
             self.scale = min(width / 1920, height / 1080)
-            self.origin = (0, 0); self.native_size = (1080, 160)
+            cells = max((len(keys) for keys in self.timeline.gauges_by_run.values()), default=0)
+            self.origin = (0, 0); self.native_size = (270 * max(1, cells), 160)
             self.position = (round(24*self.scale), height - round(184*self.scale))
         self.size = tuple(max(1, round(v*self.scale)) for v in self.native_size)
         if self.position[0] + self.size[0] > width or self.position[1] + self.size[1] > height:
@@ -338,7 +399,7 @@ class FourChannelRenderer:
 
     def frame(self, seconds):
         values = self.timeline.at(self.video.clock.utc(seconds))
-        if values is None:
+        if values is None or (not self.scene and not values):
             return self.blank
         im = Image.new("RGBA", self.native_size)
         draw = ImageDraw.Draw(im)
@@ -367,15 +428,23 @@ class FourChannelRenderer:
             draw.rectangle((0, self.native_size[1]-24, self.native_size[0], self.native_size[1]), fill=(8,20,30,210))
             draw.text((6, self.native_size[1]-22), label, font=self.fonts[14], fill="white")
         else:
-            draw.rounded_rectangle((0,0,1079,159), radius=18, fill=(10,23,36,225))
-            for i, (key, title, colour) in enumerate((("speed","SPEED · mph","#e4edf4"),("rpm","ENGINE · rpm","#57bbf0"),("throttle","THROTTLE · %","#35db94"),("brake","BRAKE · psi","#ff626b"))):
-                x=24+i*270
-                draw.text((x,15),title,font=self.fonts[22],fill=colour)
-                draw.text((x,45),str(round(values[key])),font=self.fonts[48],fill="white")
-                maximum={"speed":150,"rpm":10000,"throttle":100,"brake":600}[key]
-                draw.rounded_rectangle((x,126,x+225,136),radius=5,fill=(68,82,96,255))
-                length=round(225*max(0,min(1,values[key]/maximum)))
-                if length: draw.rectangle((x,126,x+length,136),fill=colour)
+            draw.rounded_rectangle((0, 0, len(values) * 270 - 1, 159), radius=18, fill=(10,23,36,225))
+            keys = [key for key in DASHBOARD_GAUGES if key in values]
+            for index, key in enumerate(keys):
+                _, title, colour, maximum = DASHBOARD_GAUGES[key]
+                x = 24 + index * 270
+                value = values[key]
+                draw.text((x, 15), title, font=self.fonts[22], fill=colour)
+                if key == "lap_time":
+                    reading = "0:00.000" if value == 0 else lap_time(value)
+                else:
+                    reading = str(round(value))
+                draw.text((x, 45), reading, font=self.fonts[48], fill="white")
+                if maximum is not None:
+                    draw.rounded_rectangle((x,126,x+225,136), radius=5, fill=(68,82,96,255))
+                    length = round(225 * max(0, min(1, value / maximum)))
+                    if length:
+                        draw.rectangle((x,126,x+length,136), fill=colour)
         return im.resize(self.size, Image.Resampling.LANCZOS) if im.size != self.size else im
 
     def feed(self, pipe, cancel, errors):
@@ -394,8 +463,8 @@ class FourChannelRenderer:
             except OSError: pass
 
 
-def Renderer(video, matches, width, height, scene=None):
+def Renderer(video, matches, width, height, scene=None, *, run_info=None):
     if scene is not None and scene.mode == "full":
         from .fullscene import FullSceneRenderer
         return FullSceneRenderer(video, matches, width, height, scene)
-    return FourChannelRenderer(video, matches, width, height, scene)
+    return FourChannelRenderer(video, matches, width, height, scene, run_info)

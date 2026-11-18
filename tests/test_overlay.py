@@ -83,6 +83,67 @@ class OverlayTests(ExportTestCase):
         with self.assertRaisesRegex(TelemetryError,"unit is bar"):
             Timeline([self.match],self.scene.bindings)
 
+    def test_builtin_gauges_are_independent_and_compact(self):
+        from itertools import combinations
+        names = {"speed": "velocity", "rpm": "rpm", "throttle": "tps", "brake": "brake"}
+        unit = {"rpm": "rpm", "throttle": "%", "brake": "psi"}
+        for count in range(5):
+            for keys in combinations(names, count):
+                with self.subTest(keys=keys):
+                    missing = {name for key, name in names.items() if key not in keys}
+                    keep = [i for i, column in enumerate(self.vbo.columns) if column not in missing]
+                    header = self.vbo.preamble.copy()
+                    for key, symbol in unit.items():
+                        if key not in keys:
+                            header.remove(symbol)
+                    columns = [self.vbo.columns[i] for i in keep]
+                    rows = [Row(r.utc, [r.values[i] for i in keep]) for r in self.match.rows]
+                    vbo = replace(self.vbo, columns=columns, preamble=header, rows=rows)
+                    renderer = Renderer(self.clip, [replace(self.match, vbo=vbo, rows=rows)], 1920, 1080)
+                    self.assertEqual(set(renderer.timeline.at(BASE + 1.5)), set(keys))
+                    self.assertEqual(renderer.frame(1.5).getbbox(), (0, 0, count * 270, 160) if count else None)
+
+    def test_known_aliases_pressure_conversion_and_recorded_zero(self):
+        for key, alias in [("rpm", "engine_speed"), ("tps", "throttle"), ("brake", "brake_pressure")]:
+            self.vbo.columns[self.vbo.index(key)] = alias
+        self.vbo.preamble[self.vbo.preamble.index("psi")] = "bar"
+        match = replace(self.match, rows=self.vbo.rows)
+        renderer = Renderer(self.clip, [match], 1920, 1080)
+        self.assertEqual(renderer.timeline.at(BASE)["brake"], 0)
+        self.assertAlmostEqual(renderer.timeline.at(BASE + 1)["brake"], 300 * 14.503773773)
+        self.assertEqual(renderer.timeline.at(BASE)["throttle"], 42)
+        self.assertEqual(renderer.timeline.at(BASE)["rpm"], 5500)
+        self.vbo.preamble[self.vbo.preamble.index("bar")] = "volts"
+        self.assertNotIn("brake", Renderer(self.clip, [match], 320, 180).timeline.at(BASE))
+
+    def test_mixed_runs_use_their_own_layout_and_clear_in_between(self):
+        partial = fixture(self.folder / "partial.vbo")
+        first = replace(self.match, vbo=partial, rows=partial.rows[:10])
+        renderer = Renderer(self.clip, [first, self.match], 1920, 1080)
+        self.assertEqual(renderer.frame(.5).getbbox(), (0, 0, 810, 160))
+        self.assertIsNone(renderer.frame(.95).getbbox())
+        self.assertEqual(renderer.frame(1.5).getbbox(), (0, 0, 1080, 160))
+        with self.assertRaisesRegex(TelemetryError, "required channel missing"):
+            Renderer(self.clip, [first], 1920, 1080, self.scene)
+
+    def test_elapsed_lap_timer_crossings_gaps_and_mid_lap_chapter(self):
+        from tests.test_fullscene import circle_vbo
+        vbo = circle_vbo(self.folder)
+        vbo.rows = [row for row in vbo.rows if not BASE + 14 < row.utc < BASE + 16]
+        clip = replace(self.clip, duration=60)
+        renderer = Renderer(clip, [replace(self.match, vbo=vbo, rows=vbo.rows)], 1920, 1080)
+        self.assertEqual(renderer.native_size, (1350, 160))
+        at = lambda seconds: renderer.timeline.at(BASE + seconds)
+        self.assertIsNone(at(2)["lap_time"])
+        self.assertAlmostEqual(at(8)["lap_time"], 3, places=4)
+        self.assertIsNone(at(15))
+        self.assertIsNone(at(20)["lap_time"])
+        self.assertAlmostEqual(at(25)["lap_time"], 0, places=4)
+        self.assertAlmostEqual(at(57)["lap_time"], 12, places=4)
+        rows = [row for row in vbo.rows if BASE + 29 <= row.utc < BASE + 40]
+        chapter = Renderer(clip, [replace(self.match, vbo=vbo, rows=rows)], 320, 180)
+        self.assertAlmostEqual(chapter.timeline.at(BASE + 30)["lap_time"], 5, places=4)
+
     def test_scene_excludes_pip_and_unavailable_widgets(self):
         self.assertIn("Cam2",self.scene.omitted);self.assertIn("pipborder",self.scene.omitted);self.assertIn("laps",self.scene.omitted)
         renderer=Renderer(self.clip,[self.match],320,180,self.scene)

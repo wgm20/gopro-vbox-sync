@@ -8,7 +8,7 @@ import re
 from PIL import Image, ImageDraw, ImageFilter
 
 from .gpmf import TelemetryError
-from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, FourChannelRenderer, Timeline, CHANNELS
+from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, FourChannelRenderer, Timeline, CHANNELS, recorded_channel_units
 from .lapdata import Session
 from .scene_math import SceneMath, parse_scene_math
 
@@ -209,27 +209,13 @@ class MapTransform:
     def point(self, p):return (self.offset[0]+(p[0]-self.minx)*self.scale,self.offset[1]+(self.maxy-p[1])*self.scale)
 
 
-def _recorded_channel_units(vbo):
-    # Match Timeline's VBO unit ordering, including the optional built-in entries.
-    standard={"sats","time","lat","long","velocity","heading","height","vert-vel","tsample",
-              "solution_type","avifileindex","avitime","avisynctime"}
-    custom=[column for column in vbo.columns if column not in standard]
-    marker=next((i for i,line in enumerate(vbo.preamble) if line.lower().strip()=="[channel units]"),None)
-    lines=[]
-    if marker is not None:
-        for line in vbo.preamble[marker+1:]:
-            if line.startswith("["):break
-            if line.strip():lines.append(line.strip().lower())
-    return dict(zip(custom,lines[-len(custom):])) if custom and len(lines)>=len(custom) else {}
-
-
 class FullSceneRenderer(FourChannelRenderer):
     def __init__(self, video, matches, width, height, scene):
         self.video,self.scene=video,scene
         self.timeline=Timeline(matches,scene.bindings)  # required channel/unit and ambiguity checks
         self.matches=matches
         self.sessions={m.vbo.path:Session(m.vbo) for m in matches}
-        recorded_units={path:_recorded_channel_units(session.vbo) for path,session in self.sessions.items()}
+        recorded_units={path:recorded_channel_units(session.vbo) for path,session in self.sessions.items()}
         supported={"vbox.speed_gnd_mps", "vbox.sats_used", "vbox.lat_acc_smth_mps2", "vbox.lng_acc_smth_mps2", "_resultant_acceleration",
                    "oled.plt_delta_t_ms", "laptiming.lap_time_ms", "lapresults.lap.session_best.lap_time_ms",
                    "lapresults.lap.previous.lap_time_ms", "lapresults.lap.previous.lap_number",

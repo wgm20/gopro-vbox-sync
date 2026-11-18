@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b19 — released 2026-11-18
+
+- In **Options → Overlay → Driving data**, leave **Scene** blank to show the gauges available in each VBOX recording. Speed, RPM, throttle and brake appear independently. The panel fits the gauges in use.
+- Lap time starts at a recorded start/finish crossing. A gap in timing data clears the timer until the next crossing.
+- **Export preview** lists the gauges and shows the finished dashboard before encoding. Selecting your own supported scene uses its layout, artwork, units and channel bindings.
+
 ## 1.6.0b18 — released 2026-11-18
 
 - Export the fastest complete lap covered by the ticked videos as one MP4 and its VBO. Choose another filmed lap, all matched footage or full videos beside **Create files**. The app remembers the opt-out and honours an existing full-video preference.

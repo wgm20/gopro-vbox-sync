@@ -745,6 +745,8 @@ class App:
             return
         seconds = self.preview_seconds(video)
         timing = {"seconds": seconds} if seconds is not None else {}
+        if mode == "four" and not path:
+            timing["run_info"] = scan.run_info
         run = self.active_lap.run if self.active_lap else None
         destination = Path(self.temporary.name) / "framing-source.png"
         self.status.set("Preparing the crop editor and output preview…")
@@ -918,10 +920,13 @@ class App:
         def work(cache=self.temporary):
             try:
                 from .framing import prepare_output_preview
+                captions = []
+                if mode == "four" and not path:
+                    timing.update(run_info=scan.run_info, describe_dashboard=captions.append)
                 output_size = prepare_output_preview(video, matches, rotation, size, aspect, mode,
                                                       path, destination, cancelled, choice, **timing)
                 if not cancelled.is_set():
-                    events.put(("export_preview", (generation, destination, output_size)))
+                    events.put(("export_preview", (generation, destination, output_size, "".join(captions))))
             except InterruptedError:
                 pass
             except Exception as exc:
@@ -1007,12 +1012,13 @@ class App:
                     self.status.set("Video tools ready. Choose both folders, then click Scan for matches.")
                     if value and not self.closing: self.root.after(0, value)
                 elif kind == "export_preview":
-                    generation, destination, output_size = value
+                    generation, destination, output_size, caption = value
                     if generation == self.preview_generation and not self.closing and self.export_video():
                         with Image.open(destination) as frame:
                             self.preview_source = frame.convert("RGB")
                         self.preview_display_size = None
-                        self.preview_title.set(f"Export preview · {output_size[0]} × {output_size[1]}")
+                        heading = f"Export preview · {output_size[0]} × {output_size[1]}"
+                        self.preview_title.set(heading + "\n" + caption if caption else heading)
                         self.resize_preview()
                 elif kind == "preview_failed":
                     generation, message = value if isinstance(value, tuple) else (value, "Select the export video again to retry.")

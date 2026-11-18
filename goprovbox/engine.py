@@ -602,14 +602,20 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         settings["crops"] = crop_settings
     renderers = {}
     if telemetry_overlay:
-        from .overlay import load_scene, Renderer
+        from .overlay import load_scene, Renderer, dashboard_labels
         log("Preparing the overlay and checking its data sources")
         scene = load_scene(Path(overlay_scene), mode=overlay_mode) if overlay_scene else None
-        settings["overlay"] = scene.summary() if scene else {"name": "Built-in four-channel dashboard", "speed_unit": "mph", "brake_unit": "psi"}
+        settings["overlay"] = scene.summary() if scene else {"name": "Built-in dashboard", "gauges_by_run": {}}
         settings["overlay"]["mode"] = overlay_mode
+        gauges_by_run = {}
         for video in used:
             renderers[video.path.name] = Renderer(video, [m for m in scan.matches if m.video is video],
-                                                *dimensions(video, selected[video.path.name], max_size, crop_rectangles.get(video.path.name)), scene)
+                                                *dimensions(video, selected[video.path.name], max_size, crop_rectangles.get(video.path.name)), scene, run_info=scan.run_info)
+            if scene is None:
+                for name, keys in renderers[video.path.name].timeline.gauges_by_run.items():
+                    gauges_by_run.setdefault(name, set()).update(keys)
+        if scene is None:
+            settings["overlay"]["gauges_by_run"] = {name: dashboard_labels(keys) for name, keys in gauges_by_run.items()}
         settings["overlay"]["notes"] = list(dict.fromkeys(note for renderer in renderers.values() for note in getattr(renderer, "notes", [])))
     if joining and len({dimensions(v, selected[v.path.name], max_size, crop_rectangles.get(v.path.name)) for v in used}) != 1:
         raise TelemetryError("For a joined lap, choose the same output shape for both chapters using rotation and framing.")
@@ -884,6 +890,9 @@ def write_report(report: dict, path: Path):
     overlay_info = report.get("settings", {}).get("overlay")
     if overlay_info:
         scope = "Full scene without cameras" if overlay_info.get("mode") == "full" else "Speed, RPM, throttle and brake"
+        if "gauges_by_run" in overlay_info:
+            scope = ". ".join(name + ": " + (", ".join(labels) or "No supported gauges")
+                              for name, labels in overlay_info["gauges_by_run"].items())
         warnings.append("Data overlay: " + overlay_info["name"] + ". " + scope + ". Readouts are interpolated between valid samples and hidden outside data coverage or across gaps longer than 0.5 seconds.")
         warnings.extend(overlay_info.get("notes", []))
         if overlay_info.get("omitted_elements"):

@@ -16,8 +16,8 @@ from goprovbox.engine import dimensions, encode, intersections
 from goprovbox.framing import FramingPreview, prepare_output_preview
 from goprovbox.gpmf import TelemetryError
 from goprovbox.media import executable, preview, run
-from goprovbox.overlay import Renderer, parse_scene
-from tests.test_core import video
+from goprovbox.overlay import Renderer, Timeline, parse_scene
+from tests.test_core import fixture, video
 from tests.test_overlay import four_channel_vbo, scene_members
 
 
@@ -63,7 +63,7 @@ class OutputPreviewTests(unittest.TestCase):
 
     def test_rotation_then_crop_then_resolution_uses_export_dimensions(self):
         self.clip = replace(self.clip, width=40, height=20)
-        renderer = SimpleNamespace(position=(0, 0), frame=lambda seconds: Image.new('RGBA', (1, 1)))
+        renderer = SimpleNamespace(position=(0, 0), timeline=Timeline([], None), frame=lambda seconds: Image.new('RGBA', (1, 1)))
         with patch('goprovbox.framing.preview', side_effect=self.decode) as decode, \
                 patch('goprovbox.overlay.Renderer', return_value=renderer) as render:
             size = self.prepare(choice='centre', mode='four', rotation=90, max_size=10)
@@ -127,24 +127,50 @@ class OutputPreviewTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('ffmpeg') and shutil.which('ffprobe'), 'FFmpeg required')
 class EncodedOutputPreviewTests(unittest.TestCase):
+    def test_partial_dashboard_preview_and_export_have_the_same_three_gauges(self):
+        with TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            source = folder / 'camera.mp4'
+            run([executable('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i',
+                 'color=white:s=960x540:r=10', '-t', '3', '-c:v', 'libx264', str(source)])
+            clip = replace(video(source, duration=3), width=960, height=540, fps='10/1')
+            matches = intersections(fixture(folder / 'no-brake.vbo'), clip)
+            shown, movie, decoded = (folder / name for name in ('still.png', 'out.mp4', 'frame.png'))
+            captions = []
+            size = prepare_output_preview(clip, matches, 0, 0, None, 'four', '', shown,
+                                          Event(), 'none', seconds=.4, describe_dashboard=captions.append)
+            self.assertEqual(captions, ['Speed · RPM · Throttle'])
+            encode(clip, movie, 0, 0, 'software', lambda _: None, lambda _: None, Event(),
+                   Renderer(clip, matches, *size))
+            preview(movie, .4, 0, decoded, output_size=size)
+            with Image.open(shown) as still, Image.open(decoded) as actual:
+                for frame in (still, actual):
+                    for x in (32, 167, 302):
+                        self.assertLess(max(frame.getpixel((x, 522))), 100)
+                    self.assertGreater(min(frame.getpixel((438, 522))), 235)
+                dashboard = (12, 448, 417, 528)
+                diff = ImageChops.difference(still.convert('RGB'), actual.convert('RGB')).crop(dashboard)
+                self.assertLess(max(ImageStat.Stat(diff).mean), 8)
+
     def test_cropped_rotated_overlay_matches_real_encoded_pixels(self):
         with TemporaryDirectory() as temporary:
             folder = Path(temporary)
             source = folder / 'camera.mp4'
             run([executable('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i',
                  'color=white:s=320x320:r=10,drawbox=x=0:y=0:w=320:h=160:color=red:t=fill',
-                 '-t', '1', '-c:v', 'libx264', str(source)])
-            clip = replace(video(source, duration=1), width=320, height=320, fps='10/1')
+                 '-t', '3', '-c:v', 'libx264', str(source)])
+            clip = replace(video(source, duration=3), width=320, height=320, fps='10/1')
             vbo = four_channel_vbo(folder)
             for row in vbo.rows:
                 row.values[vbo.index('brake')] = '100'
             matches = intersections(vbo, clip)
+            self.assertTrue(matches)
             scene = parse_scene(scene_members())
             choice = {'mode': 'custom', 'x': .5, 'y': .2}
             destination = folder / 'preview.png'
             with patch('goprovbox.overlay.load_scene', return_value=scene):
                 size = prepare_output_preview(clip, matches, 90, 160, Fraction(2), 'four',
-                                              'synthetic.gvscene', destination, Event(), choice)
+                                              'synthetic.gvscene', destination, Event(), choice, seconds=.5)
             crop = rectangle(320, 320, 90, Fraction(2), choice)
             self.assertEqual(size, dimensions(clip, 90, 160, crop))
             renderer = Renderer(clip, matches, *size, scene)
