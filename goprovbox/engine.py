@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import time
+from tempfile import TemporaryDirectory
 import uuid
 
 from . import __version__
@@ -25,6 +26,7 @@ from .media import Video, inspect_video, probe, utc_text, executable, run, previ
 from .vbo import VBO, Row, read_vbo, write_vbo
 from .crop import Choice, Reference, rectangle, reference_for, validate_choice
 from .trimming import video_parts
+from .lapexport import filmed_laps, lap_part, recording_groups
 from .sound import plan_audio, render_audio, attach_audio
 from .reports import archive_details, export_report_path
 from .runinfo import collect_run_info
@@ -308,23 +310,6 @@ def scan_folder(folder: Path, log=lambda msg: None, cancel: Event | None = None,
     return scan
 
 
-def recording_groups(videos: list[Video]) -> list[list[Video]]:
-    groups = []
-    for video in sorted(videos, key=lambda v: v.clock.origin):
-        name = re.fullmatch(r"G([HX])(\d{2})(\d{4})", video.path.stem, re.I)
-        found = False
-        for group in groups:
-            prev = group[-1]
-            old = re.fullmatch(r"G([HX])(\d{2})(\d{4})", prev.path.stem, re.I)
-            if name and old and name[1].upper() == old[1].upper() and name[3] == old[3] and int(name[2]) == int(old[2]) + 1:
-                gap = video.clock.origin - prev.clock.utc(prev.duration)
-                if abs(gap) <= .25:
-                    group.append(video); found = True; break
-        if not found:
-            groups.append([video])
-    return groups
-
-
 def dimensions(video: Video, rotation: int, max_size: int, crop=None):
     w, h = (video.height, video.width) if rotation % 180 else (video.width, video.height)
     if crop:
@@ -486,7 +471,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
            progress=lambda value: None, cancel: Event | None = None,
            telemetry_overlay: bool = False, overlay_scene: Path | None = None, overlay_mode="four",
            include_videos: set[str] | None = None, crops: dict[str, Choice] | None = None,
-           overlap_only: bool = True, audio_source: str = "vbox") -> Path:
+           overlap_only: bool = True, audio_source: str = "vbox",
+           lap="fastest", lap_padding: int = 0) -> Path:
     cancel = cancel or Event()
     if audio_source not in ("vbox", "gopro"):
         raise TelemetryError("Choose VBOX or GoPro sound")
@@ -513,10 +499,34 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         scan = select_for_export(scan, included)
         rotations = {name:value for name,value in rotations.items() if name in included}
         crops = {name:value for name,value in crops.items() if name in included}
+    if lap_padding not in (0, 2, 5):
+        raise TelemetryError("Choose 0, 2 or 5 seconds of lap padding")
+    choice = None
+    if overlap_only and lap is not None:
+        options = filmed_laps(scan, {v.path.name for v in scan.videos})
+        if lap == "fastest":
+            choice = options[0] if options else None
+            if choice is None:
+                log("No complete filmed lap. Exporting all matched footage.")
+        else:
+            choice = next((item for item in options if item.key == lap), None)
+            if choice is None:
+                raise TelemetryError("The selected lap is no longer fully covered. Choose another lap or all matched footage.")
+    spans = {}
+    if choice:
+        spans = {span.video: span for span in choice.spans(lap_padding)}
+        scan = select_for_export(scan, set(spans))
+        scan = replace(scan, matches=[m for m in scan.matches if m.vbo.path.name == choice.run],
+                       vbos=[v for v in scan.vbos if v.path.name == choice.run])
+        crops = {name: value for name, value in crops.items() if name in spans}
     default_name = "GoPro Circuit Tools Overlay" if telemetry_overlay else "GoPro Circuit Tools"
     if any(mode != "none" for mode in crops.values()):
         default_name += " Cropped"
-    if overlap_only:
+    if choice:
+        default_name += f" {safe_stem(Path(choice.run).stem)} Lap {choice.number}"
+        if lap_padding:
+            default_name += f" Plus {lap_padding}s"
+    elif overlap_only:
         default_name += " Matched"
     output = (output or scan.folder / default_name).resolve()
     source_folders = {scan.folder.resolve(), (scan.gopro_folder or scan.folder).resolve()}
@@ -531,27 +541,33 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
     used = [v for v in scan.videos if any(m.video is v for m in scan.matches)]
     selected = {}
     for video in used:
-        choice = rotations.get(video.path.name, video.orientation.clockwise)
-        if choice not in (0, 90, 180, 270):
+        rotation = rotations.get(video.path.name, video.orientation.clockwise)
+        if rotation not in (0, 90, 180, 270):
             raise TelemetryError(f"{video.path.name}: inspect the preview and choose a rotation before exporting")
-        selected[video.path.name] = choice
+        selected[video.path.name] = rotation
     settings = {"version": __version__, "rotations": selected, "max_size": max_size, "encoder": encoder,
                 "included_videos": [v.path.name for v in used], "overlap_only": overlap_only}
     # Check the scan before reading linked media or preparing an overlay.
     _check_sources(scan)
-    parts = {v.path.name: video_parts(v, scan.matches, overlap_only) for v in used}
+    if choice:
+        settings["lap"] = {"run": choice.run, "number": choice.number, "utc_start": choice.start,
+                           "utc_end": choice.end, "duration_seconds": choice.duration, "padding_seconds": lap_padding}
+        parts = {v.path.name: [lap_part(v, spans[v.path.name])] for v in used}
+    else:
+        parts = {v.path.name: video_parts(v, scan.matches, overlap_only) for v in used}
+    joining = bool(choice and len(used) > 1)
     settings["video_ranges"] = {name: [part.summary() for part in clips] for name, clips in parts.items()}
     audio_plans, sound_sources, sound_checks = {}, {}, {}
     settings["audio_source"] = audio_source
-    if audio_source == "vbox":
-        log("Matching VBOX sound to the GoPro GPS clock")
+    if audio_source == "vbox" or choice is not None:
+        log("Aligning sound to the selected video")
         audio_cache = {}
         for video in used:
             linked = [m for m in scan.matches if m.video is video]
             plans = []
             for part in parts[video.path.name]:
                 if cancel.is_set(): raise InterruptedError("Cancelled")
-                plan = plan_audio(part.video, linked, audio_cache)
+                plan = plan_audio(part.video, linked, audio_cache, prefer_vbox=audio_source == "vbox")
                 plans.append(plan)
                 for path, stamp in plan.sources.items():
                     info = fingerprint(path)
@@ -595,6 +611,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
             renderers[video.path.name] = Renderer(video, [m for m in scan.matches if m.video is video],
                                                 *dimensions(video, selected[video.path.name], max_size, crop_rectangles.get(video.path.name)), scene)
         settings["overlay"]["notes"] = list(dict.fromkeys(note for renderer in renderers.values() for note in getattr(renderer, "notes", [])))
+    if joining and len({dimensions(v, selected[v.path.name], max_size, crop_rectangles.get(v.path.name)) for v in used}) != 1:
+        raise TelemetryError("For a joined lap, choose the same output shape for both chapters using rotation and framing.")
     signature_inputs = {"sources": scan.fingerprints, "settings": settings}
     if scan.source_paths:
         signature_inputs["source_paths"] = scan.source_paths
@@ -633,13 +651,18 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                               "compatibility_notes": [CT_COMPATIBILITY_NOTE]}
     names = set()
     record = None
+    chapter_work = TemporaryDirectory(dir=staging) if joining else None
+    media_folder = Path(chapter_work.name) if chapter_work else staging
     try:
         duration_done = 0
         for group in groups:
             prefix = "GoPro_" + safe_stem(group[0].path.stem) + "_"
+            if choice:
+                prefix = f"GoPro_{safe_stem(Path(choice.run).stem)}_Lap{choice.number}_"
             avi_prefix = prefix
             group_parts = [part for video in group for part in parts[video.path.name]]
             video_files = {}
+            offsets = {}
             for index, part in enumerate(group_parts, 1):
                 video = part.video
                 if cancel.is_set():
@@ -648,7 +671,7 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                 if filename.casefold() in names:
                     raise TelemetryError("Input filenames produce conflicting output names")
                 names.add(filename.casefold())
-                dest = staging / filename
+                dest = media_folder / filename
                 preview_name = dest.stem + ".jpg"
                 rotation = selected[video.path.name]
                 renderer = renderers.get(video.path.name)
@@ -658,10 +681,10 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     renderer.video = video
                 sound = None
                 audio_plan = None
-                if audio_source == "vbox":
+                if audio_source == "vbox" or choice is not None:
                     part_index = parts[video.path.name].index(part)
                     audio_plan = audio_plans[video.path.name][part_index]
-                    sound = staging / (dest.stem + ".audio.wav")
+                    sound = media_folder / (dest.stem + ".audio.wav")
                     log(f"Preparing aligned sound for {video.path.name}")
                     render_audio(audio_plan, sound, cancel,
                                  lambda p: progress((duration_done + p*video.duration*.03) / duration_total*.93))
@@ -670,9 +693,11 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                                  overlay=renderer, crop=crop_rectangles.get(video.path.name),
                                  source_start=part.start if overlap_only else None, mute=sound is not None)
                 audio_checked = {"source": "gopro"}
-                if sound:
+                if sound and not joining:
                     log("Attaching and verifying the aligned sound")
                     audio_checked = attach_audio(dest, sound, video.duration, cancel)
+                    if audio_source == "gopro":
+                        audio_checked["source"] = "gopro"
                 checked = validate_video(video, dest, rotation, max_size, crop_rectangles.get(video.path.name), part.frames)
                 video_files[index] = filename
                 preview_time = min(30, video.duration / 2)
@@ -681,19 +706,54 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                 elif telemetry_overlay:
                     first_match = next(m for m in scan.matches if m.video is part.source)
                     preview_time = video.clock.media_time((first_match.rows[0].utc + first_match.rows[-1].utc) / 2)
-                preview(dest, preview_time, 0, staging / preview_name)
+                if not joining:
+                    preview(dest, preview_time, 0, staging / preview_name)
                 report["media"].append({"file": filename, "source": video.path.name, "rotation_clockwise": selected[video.path.name],
                                          "encoder": backend, "preview": preview_name, "verification": checked,
                                          "crop": crop_settings.get(video.path.name), "range": part.summary(),
                                          "audio": audio_checked | ({"plan": audio_plan.summary()} if audio_plan else {})})
                 duration_done += video.duration
+            references = {i: p.video for i, p in enumerate(group_parts, 1)}
+            if joining:
+                from .lapmedia import join_chapters
+                filename = video_files[1]
+                dest = staging / filename
+                total_frames = sum(p.frames for p in group_parts)
+                first = group_parts[0].video
+                duration = float(total_frames / Fraction(first.fps))
+                combined = replace(first, duration=duration)
+                elapsed_frames = 0
+                for i, part in enumerate(group_parts, 1):
+                    offsets[i] = float(elapsed_frames / Fraction(first.fps))
+                    elapsed_frames += part.frames
+                log("Joining the lap across camera chapters")
+                audio = join_chapters([media_folder / video_files[i] for i in references], group_parts, dest, cancel)
+                checked = validate_video(combined, dest, selected[first.path.name], max_size,
+                                         crop_rectangles.get(first.path.name), total_frames)
+                preview_name = dest.stem + ".jpg"
+                preview(dest, duration / 2, 0, staging / preview_name)
+                records = report["media"]
+                report["media"] = [dict(records[0], source=", ".join(p.source.path.name for p in group_parts),
+                                        verification=checked, preview=preview_name, audio=audio | {"source": audio_source},
+                                        chapters=records, range={"source_start_seconds": 0,
+                                        "source_end_seconds": duration, "duration_seconds": duration, "frames": total_frames})]
+                references = {1: combined}
             for vbo in scan.vbos:
                 entries = []
                 for index, part in enumerate(group_parts, 1):
                     for match in scan.matches:
                         if match.video is part.source and match.vbo is vbo:
-                            entries.extend((row, part.source.clock.media_time(row.utc) - part.start, index)
-                                           for row in match.rows if part.contains(row.utc))
+                            for row in match.rows:
+                                if not part.contains(row.utc):
+                                    continue
+                                if choice:
+                                    span = spans[part.source.path.name]
+                                    if not span.start <= row.utc < span.end:
+                                        continue
+                                reference = 1 if joining else index
+                                seconds = offsets.get(index, 0) + part.source.clock.media_time(row.utc) - part.start
+                                if not choice or round(seconds * 1000) / 1000 < references[reference].duration:
+                                    entries.append((row, seconds, reference))
                 if not entries:
                     continue
                 entries.sort(key=lambda entry: (entry[0].utc, entry[2]))
@@ -718,12 +778,14 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
                     names.add(filename.casefold())
                     rs, ts, indices = map(list, zip(*chunk))
                     write_vbo(vbo, rs, ts, avi_prefix, staging / filename, indices)
-                    verify_vbo(staging / filename, vbo, rs, ts, indices, {i: p.video for i, p in enumerate(group_parts, 1)})
+                    verify_vbo(staging / filename, vbo, rs, ts, indices, references)
                     report["outputs"].append({"file": filename, "source": vbo.path.name, "samples": len(rs),
                         "utc_start": utc_text(rs[0].utc), "utc_end": utc_text(rs[-1].utc),
                         "overlap_seconds": rs[-1].utc - rs[0].utc,
                         "videos": [video_files[idx] for idx in sorted(set(indices))],
                         "telemetry_preserved": True})
+        if chapter_work:
+            chapter_work.cleanup()
         _check_sources(scan, during_export=True)
         for path, info in sound_checks.items():
             if fingerprint(path) != info:
@@ -747,6 +809,8 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         (staging / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         if record is not None:
             (record / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        if chapter_work:
+            chapter_work.cleanup()
         log(f"Incomplete work and diagnostic logs saved in {staging}")
         raise
 
@@ -795,6 +859,8 @@ def write_report(report: dict, path: Path):
         return "VBOX " + crop["reference"]["aspect"] + " · " + mode
     def range_description(media):
         span = media.get("range")
+        if media.get("chapters"):
+            return f'<p>{len(media["chapters"])} joined camera chapters · {span["duration_seconds"]:.1f} seconds</p>'
         if not span:
             return ""
         def stamp(seconds):
@@ -812,6 +878,8 @@ def write_report(report: dict, path: Path):
     coverage_note = ("Only periods with matching VBOX data are retained, including their boundary frames. Separate periods use separate clips."
                      if report.get("settings", {}).get("overlap_only") else
                      "Full video chapters are retained; the VBO links only to valid overlapping samples.")
+    if lap_info := report.get("settings", {}).get("lap"):
+        coverage_note = f'Lap {lap_info["number"]} from {e(lap_info["run"])} · {lap_info["duration_seconds"]:.3f} s, with up to {lap_info["padding_seconds"]} s either side.'
     warnings = report.get("compatibility_notes", []) + report["errors"] + [w for v in report["videos"] for w in v["warnings"]] + [w for m in report["matches"] for w in m["warnings"]]
     overlay_info = report.get("settings", {}).get("overlay")
     if overlay_info:

@@ -176,6 +176,79 @@ class TrimEncodingTests(ExportTestCase):
             rows = [r for r in output.rows if int(r.values[output.index('avifileindex')]) == index]
             self.assertEqual(int(rows[0].values[output.index('avitime')]), 0)
 
+    def test_fastest_lap_joins_real_frames_audio_and_one_vbo_timeline(self):
+        fps = Fraction(30000, 1001)
+        duration = float(90 / fps)
+        clips = []
+        for index, colour in enumerate(("red", "blue")):
+            path = self.folder / f"GX0{index + 1}0777.mp4"
+            run([executable("ffmpeg"), "-v", "error", "-f", "lavfi", "-i", f"color={colour}:s=160x160:r={fps}",
+                 "-f", "lavfi", "-i", f"sine=f={440 * (index + 1)}:r=48000", "-t", str(duration),
+                 "-c:v", "libx264", "-c:a", "aac", str(path)])
+            clips.append(replace(self.clip, path=path, duration=duration, fps=str(fps),
+                                 clock=replace(self.clip.clock, origin=BASE + index*duration)))
+        vbo = fixture(self.folder / "test.vbo", timestamps(0, 6100))
+        scan = self.scan(vbo, clips)
+        def lap(number, start, end):
+            return dict(number=number, utc_start=BASE+start, utc_end=BASE+end, duration_seconds=end-start)
+        scan.run_info = {"test.vbo": {"laps": [lap(1, .25, 2.55), lap(2, 2.55, 4.05)]}}
+        result = export(scan, encoder="software", audio_source="gopro")
+        movie, = result.glob("*.mp4")
+        data, = result.glob("*.vbo")
+        self.assertEqual(set(result.iterdir()), {movie, data})
+        report = json.loads(export_report_path(result, "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["settings"]["lap"]["number"], 2)
+        info = report["media"][0]
+        self.assertEqual(len(info["chapters"]), 2)
+        self.assertEqual(len(report["media"]), 1)
+        frames = self.frame_values(movie)
+        self.assertEqual(len(frames), 46)
+        self.assertGreater(frames[0], frames[-1] + 25)
+        self.assertAlmostEqual(float(info["audio"]["duration_seconds"]), float(46/fps), places=2)
+        # Distinct tones on each side of the seam also verify the input order.
+        for t, tone in ((.1, 440), (.8, 880)):
+            raw = run([executable("ffmpeg"), "-v", "error", "-ss", str(t), "-i", str(movie),
+                       "-t", "0.2", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1"])
+            samples = array("h", raw)
+            rising = sum(a <= 0 < b for a, b in zip(samples, samples[1:]))
+            self.assertAlmostEqual(rising / .2, tone, delta=15)
+        reread = read_vbo(data)
+        vi, ti = reread.index("avifileindex"), reread.index("avitime")
+        self.assertTrue(all(int(r.values[vi]) == 1 for r in reread.rows))
+        self.assertEqual([r.utc for r in reread.rows], [r.utc for r in vbo.rows if BASE+2.55 <= r.utc < BASE+4.05])
+        for row in reread.rows:
+            self.assertAlmostEqual(float(row.values[ti])/1000, row.utc-BASE-float(76/fps), places=3)
+        self.assertEqual(export(scan, encoder="software", audio_source="gopro"), result)
+        from goprovbox.lapexport import filmed_laps
+        choices = filmed_laps(scan, {c.path.name for c in clips})
+        other = export(scan, self.folder/"other", lap=choices[1].key, lap_padding=2, encoder="software")
+        other_report = json.loads(export_report_path(other, "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(other_report["settings"]["lap"]["number"], 1)
+        self.assertEqual(other_report["media"][0]["chapters"][0]["range"]["source_start_seconds"], 0)
+        self.assertEqual([l.number for l in filmed_laps(scan, {clips[0].path.name})], [1])
+
+    def test_lap_requires_continuous_camera_coverage_and_honours_opt_out(self):
+        vbo = fixture(self.folder / "test.vbo", timestamps(0, 8100))
+        scan = self.scan(vbo)
+        scan.run_info = {"test.vbo": {"laps": [
+            dict(number=1, utc_start=BASE+1, utc_end=BASE+3, duration_seconds=2),
+            dict(number=2, utc_start=BASE+3, utc_end=BASE+5, duration_seconds=2)]}}
+        from goprovbox.lapexport import filmed_laps
+        options = filmed_laps(scan, {self.clip.path.name})
+        self.assertEqual([lap.number for lap in options], [1, 2])
+        with self.assertRaisesRegex(TelemetryError, "no longer fully covered"):
+            export(scan, lap=("wrong.vbo", 1, self.clip.path.name))
+        for name, overlap in (("full", False), ("matched", True)):
+            result = export(scan, self.folder/name, encoder="software", lap=None, overlap_only=overlap)
+            report = json.loads(export_report_path(result, "report.json").read_text(encoding="utf-8"))
+            self.assertNotIn("lap", report["settings"])
+            self.assertGreater(float(report["media"][0]["verification"]["duration"]), 7.8)
+        first = replace(self.clip, path=self.folder/"GX010007.mp4", duration=4)
+        second = replace(first, path=self.folder/"GX020007.mp4", clock=replace(first.clock, origin=BASE+4.1))
+        scan.videos = [first, second]
+        scan.matches = intersections(vbo, first) + intersections(vbo, second)
+        self.assertEqual([l.number for l in filmed_laps(scan, {v.path.name for v in scan.videos})], [1])
+
     def test_nonzero_container_start_and_fractional_fps_keep_the_first_frame(self):
         shifted = self.folder / 'shifted.mp4'
         run([executable('ffmpeg'), '-v', 'error', '-i', str(self.source), '-vf', 'setpts=N/(30000/1001*TB)',

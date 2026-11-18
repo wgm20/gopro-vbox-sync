@@ -17,7 +17,8 @@ import webbrowser
 from PIL import Image, ImageDraw, ImageTk
 
 from . import __version__
-from .engine import scan_folder, export
+from .engine import scan_folder, export, safe_stem
+from .lapexport import filmed_laps
 from .reports import export_report_path
 from .crop import rectangle
 from .runinfo import video_run_info
@@ -32,6 +33,9 @@ SOUND = {"VBOX (GoPro for gaps)": "vbox", "GoPro": "gopro"}
 TABLE_COLUMNS = (("include", "Include", 58), ("video", "GoPro", 126), ("vbox", "VBOX", 112),
                  ("date", "Date", 94), ("start", "Start", 82),
                  ("lap", "Best in file", 102), ("overlap", "Overlap", 82))
+FASTEST = "Fastest filmed lap"
+MATCHED = "All matched footage"
+FULL = "Full videos"
 FASTEST_COLOR = "#c62828"
 
 
@@ -104,6 +108,13 @@ class App:
         self.rotation = tk.StringVar(value=next(iter(ROTATIONS)))
         self.crop_note = tk.StringVar()
         self.overlap_only = tk.BooleanVar(value=prefs.get("overlap_only", True))
+        self.prefer_lap = prefs.get("prefer_lap", self.overlap_only.get())
+        self.range_label = tk.StringVar(value=FASTEST if self.prefer_lap else MATCHED if self.overlap_only.get() else FULL)
+        self.lap_choices = {}
+        self.active_lap = None
+        self.explicit_lap = None
+        self.last_default_output = ""
+        self.lap_padding = tk.IntVar(value=prefs.get("lap_padding", 0) if prefs.get("lap_padding") in (2, 5) else 0)
         self.audio_source = tk.StringVar(value=next((label for label, value in SOUND.items()
                                                     if value == prefs.get("audio_source", "vbox")), next(iter(SOUND))))
         self.overlay_mode = tk.StringVar(value=prefs.get("overlay_mode", "Driving data" if prefs.get("overlay_enabled") else "None"))
@@ -241,6 +252,11 @@ class App:
         self.progress = ttk.Progressbar(footer, maximum=100); self.progress.pack(fill="x", pady=(2,7))
         ttk.Label(footer, textvariable=self.status).pack(anchor="w")
         actions = ttk.Frame(footer); actions.pack(fill="x", pady=(8,0))
+        ttk.Label(actions, text="Export").pack(side="left", padx=(0, 4))
+        self.range_combo = ttk.Combobox(actions, textvariable=self.range_label, state="readonly",
+                                        values=(FASTEST, MATCHED, FULL), width=32)
+        self.range_combo.pack(side="left", padx=(0, 8))
+        self.range_combo.bind("<<ComboboxSelected>>", self.change_range)
         self.create = ttk.Button(actions, text="Create files", style="Accent.TButton", command=self.begin_export, state="disabled")
         self.create.pack(side="left")
         self.stop = ttk.Button(actions, text="Cancel", command=self.cancel_work, state="disabled"); self.stop.pack(side="left", padx=8)
@@ -277,7 +293,13 @@ class App:
             self.options_menu.add_cascade(label=label, menu=menu)
         self.options_menu.add_separator()
         self.options_menu.add_checkbutton(label="Only export video with VBOX data", variable=self.overlap_only,
-                                          command=self.quality_changed)
+                                          command=self.change_overlap)
+        self.padding_menu = tk.Menu(self.options_menu, tearoff=False)
+        for seconds in (0, 2, 5):
+            label = "Start/finish crossings" if seconds == 0 else f"{seconds} seconds either side"
+            self.padding_menu.add_radiobutton(label=label, variable=self.lap_padding, value=seconds,
+                                              command=self.range_changed)
+        self.options_menu.add_cascade(label="Lap padding", menu=self.padding_menu)
         self.options_menu.add_checkbutton(label="Include GoPro subfolders", variable=self.recursive_gopro)
         self.options_menu.add_separator()
         self.options_menu.add_command(label="Details…", command=self.show_details)
@@ -441,9 +463,11 @@ class App:
     def export_candidates(self):
         if self.scan is None:
             return []
+        names = ({s.video for s in self.active_lap.spans(self.lap_padding.get())}
+                 if self.active_lap else self.included_videos)
         linked = {id(match.video) for match in getattr(self.scan, "matches", ())}
         return sorted((video for video in getattr(self.scan, "videos", ())
-                       if video.path.name in self.included_videos and id(video) in linked),
+                       if video.path.name in names and id(video) in linked),
                       key=lambda video: (video.clock.utc(0), video.path.name.casefold()))
 
     def export_video(self):
@@ -550,6 +574,7 @@ class App:
         if self.crop_choice != "none":
             self.log("Recording sources or scan options changed; saved framing was cleared.")
         self.scan = None; self.result = None
+        self.explicit_lap = None; self.update_selection_summary()
         self.selection_data.clear(); self.run_detail.set("")
         self.included_videos.clear(); self.tree.delete(*self.tree.get_children()); self.summary.set("")
         self.rotations.clear(); self.crop_choice = "none"; self.crop_note.set("")
@@ -559,13 +584,60 @@ class App:
         self.quality_changed()
         self.set_busy(False)
 
+    def change_overlap(self):
+        self.prefer_lap = False
+        self.explicit_lap = None
+        self.range_changed()
+
+    def change_range(self, *_):
+        label = self.range_label.get()
+        self.explicit_lap = self.lap_choices[label].key if label in self.lap_choices else None
+        self.prefer_lap = label not in (MATCHED, FULL)
+        self.overlap_only.set(label != FULL)
+        self.range_changed()
+
+    def range_changed(self):
+        self.update_selection_summary()
+        self.quality_changed()
+        self.sync_export_preview()
+
     def update_selection_summary(self):
+        choices = (filmed_laps(self.scan, self.included_videos)
+                   if self.scan and getattr(self.scan, "run_info", None) else [])
+        self.lap_choices = {}
+        for lap in sorted(choices, key=lambda x: (x.run, x.number, x.key)):
+            label = f"{Path(lap.run).stem} · Lap {lap.number} · {lap_time(lap.duration)}"
+            if label in self.lap_choices:
+                label += f" · {lap.coverage[0].video}"
+            self.lap_choices[label] = lap
+        self.active_lap = None
+        label = MATCHED if self.overlap_only.get() else FULL
+        if self.prefer_lap:
+            label = FASTEST
+            selected = next(((k, v) for k, v in self.lap_choices.items() if v.key == self.explicit_lap), None)
+            if selected:
+                label, self.active_lap = selected
+            else:
+                self.explicit_lap = None
+                self.active_lap = choices[0] if choices else None
+        self.range_label.set(label)
+        self.range_combo.configure(values=(FASTEST, MATCHED, FULL, *self.lap_choices))
+        if self.scan and self.active_lap:
+            lap = self.active_lap
+            pad = self.lap_padding.get()
+            extra = f" · up to {pad} s either side" if pad else ""
+            self.summary.set(f"Exporting {Path(lap.run).stem} · Lap {lap.number} · {lap_time(lap.duration)}{extra}")
+            return
+
         if self.scan is None:
             return
         matches = [m for m in self.scan.matches if m.video.path.name in self.included_videos]
         seconds = sum(m.rows[-1].utc - m.rows[0].utc for m in matches)
-        self.summary.set(f"{len(self.scan.videos)} videos · {len(self.included_videos)} included · {seconds / 60:.1f} minutes of data"
-                         + (f" · {len(self.scan.errors)} issues — Options → Details" if self.scan.errors else ""))
+        if self.prefer_lap and matches:
+            self.summary.set(f"No complete filmed lap in the selection. Exporting {seconds / 60:.1f} minutes of matched footage.")
+            return
+        self.summary.set(f"{len(getattr(self.scan, 'videos', ()))} videos · {len(self.included_videos)} included · {seconds / 60:.1f} minutes of data"
+                         + (f" · {len(self.scan.errors)} issues — Options → Details" if getattr(self.scan, "errors", ()) else ""))
 
     def toggle_include(self, row):
         if self.busy or self.scan is None or not row:
@@ -605,7 +677,11 @@ class App:
         name = "GoPro Circuit Tools Overlay" if OVERLAYS[self.overlay_mode.get()] != "none" else "GoPro Circuit Tools"
         if self.crop_choice != "none":
             name += " Cropped"
-        if self.overlap_only.get():
+        if self.active_lap:
+            name += f" {safe_stem(Path(self.active_lap.run).stem)} Lap {self.active_lap.number}"
+            if self.lap_padding.get():
+                name += f" Plus {self.lap_padding.get()}s"
+        elif self.overlap_only.get():
             name += " Matched"
         return name
 
@@ -613,6 +689,8 @@ class App:
         defaults = {str(Path(self.folder.get()) / (name + suffix + trimmed))
                     for name in ("GoPro Circuit Tools", "GoPro Circuit Tools Original", "GoPro Circuit Tools Overlay")
                     for suffix in ("", " Cropped") for trimmed in ("", " Matched")}
+        defaults.add(self.last_default_output)
+        self.last_default_output = str(Path(self.folder.get()) / self.output_name())
         if self.folder.get() and self.output.get() in defaults:
             self.output.set(str(Path(self.folder.get()) / self.output_name()))
         self.refresh_export_preview()
@@ -640,6 +718,13 @@ class App:
             self.preview_request = None
             self.refresh_export_preview()
 
+    def preview_seconds(self, video):
+        if self.active_lap:
+            for span in self.active_lap.spans(self.lap_padding.get()):
+                if span.video == video.path.name:
+                    return video.clock.media_time((span.start + span.end) / 2)
+        return None
+
     def preview_overlay(self):
         video = self.export_video()
         if not video or self.busy:
@@ -658,15 +743,18 @@ class App:
                 "You can also choose another Preview video with cropping available to change or turn off the crop for all selected videos.",
                 parent=self.root)
             return
+        seconds = self.preview_seconds(video)
+        timing = {"seconds": seconds} if seconds is not None else {}
+        run = self.active_lap.run if self.active_lap else None
         destination = Path(self.temporary.name) / "framing-source.png"
         self.status.set("Preparing the crop editor and output preview…")
         def work():
             from .framing import prepare_preview
-            matches = [m for m in scan.matches if m.video is video]
+            matches = [m for m in scan.matches if m.video is video and (run is None or m.vbo.path.name == run)]
             if not matches and mode != "none":
                 raise ValueError("This video has no matching VBOX data")
             prepared = prepare_preview(video, matches, rotation, size, ref.aspect if ref else None,
-                                       mode, path, destination, self.cancel)
+                                       mode, path, destination, self.cancel, **timing)
             self.events.put(("framing_preview", (prepared, choice, scan)))
         self.worker(work)
 
@@ -688,6 +776,8 @@ class App:
 
     def set_busy(self, busy):
         self.busy = busy
+        self.range_combo.configure(state="disabled" if busy else "readonly")
+        self.options_menu.entryconfigure("Lap padding", state="disabled" if busy or not self.prefer_lap else "normal")
         self.help_menu.entryconfigure("Uninstall app…", state="disabled" if busy else "normal")
         for widget in (self.scan_button, self.browse, self.source_entry, self.output_entry, self.output_button):
             widget.configure(state="disabled" if busy else "normal")
@@ -746,6 +836,7 @@ class App:
         self.result = None; self.rotations = {}; self.crop_choice = "none"; self.progress["value"] = 0
         self.crop_note.set("")
         self.scan = None; self.included_videos.clear(); self.summary.set("")
+        self.explicit_lap = None; self.update_selection_summary()
         self.selection_data.clear(); self.run_detail.set("")
         self.clear_export_preview()
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
@@ -795,7 +886,9 @@ class App:
         choice = deepcopy(self.crop_choice)
         ref = scan.crop_references.get(video.path.name)
         aspect = ref.aspect if ref else None
-        request = (id(scan), id(video), rotation, size, mode, path,
+        seconds = self.preview_seconds(video)
+        request = (id(scan), id(video), self.active_lap.key if self.active_lap else None,
+                   rotation, size, mode, path, seconds,
                    str(aspect), json.dumps(choice, sort_keys=True))
         if request == self.preview_request:
             return
@@ -805,7 +898,8 @@ class App:
         self.preview_generation += 1
         generation = self.preview_generation
         destination = Path(self.temporary.name) / f"frame-{generation}.png"
-        matches = [match for match in scan.matches if match.video is video]
+        run = self.active_lap.run if self.active_lap else None
+        matches = [m for m in scan.matches if m.video is video and (run is None or m.vbo.path.name == run)]
         note = f"VBOX {ref.label} · no crop" if ref else "VBOX crop needs the original VBOX video. See Options → Details."
         crop = self.video_crop(video, rotation) if ref else None
         if choice != "none" and ref is None:
@@ -820,11 +914,12 @@ class App:
         self.preview_label.configure(image="", text="Rendering export preview…")
         self.preview_source = None; self.preview_display_size = None
         events = self.events
+        timing = {"seconds": seconds} if seconds is not None else {}
         def work(cache=self.temporary):
             try:
                 from .framing import prepare_output_preview
                 output_size = prepare_output_preview(video, matches, rotation, size, aspect, mode,
-                                                      path, destination, cancelled, choice)
+                                                      path, destination, cancelled, choice, **timing)
                 if not cancelled.is_set():
                     events.put(("export_preview", (generation, destination, output_size)))
             except InterruptedError:
@@ -843,6 +938,11 @@ class App:
         if not included:
             messagebox.showerror("Choose videos", "Tick at least one video to include in processing."); return
         rotations = {v.path.name: self.rotations.get(v.path.name, 0) for v in scan.videos}
+        checked_pool = set(included)
+        lap = self.active_lap
+        padding = self.lap_padding.get()
+        if lap:
+            included = {s.video for s in lap.spans(padding)}
         size = QUALITY[self.quality.get()]
         crops = {name: deepcopy(self.crop_choice) for name in included} if self.crop_choice != "none" else {}
         missing = sorted(set(crops) - set(scan.crop_references), key=str.casefold)
@@ -863,7 +963,8 @@ class App:
         self.status.set("Preparing video and data…")
         self.progress["value"] = 0
         self.worker(lambda: self.events.put(("complete", export(scan, output, rotations=rotations, max_size=size,
-            include_videos=included, crops=crops, overlap_only=overlap_only, audio_source=audio_source,
+            include_videos=checked_pool, crops=crops, overlap_only=overlap_only, audio_source=audio_source,
+            lap=lap.key if lap else None, lap_padding=padding,
             telemetry_overlay=overlay_enabled, overlay_scene=scene, overlay_mode=mode if mode != "none" else "four",
             log=lambda m: self.events.put(("log", m)), progress=lambda v: self.events.put(("progress", v)), cancel=self.cancel))))
 
@@ -925,6 +1026,7 @@ class App:
                     self.included_videos = {m.video.path.name for m in value.matches}
                     self.update_selection_summary()
                     self.refresh_rows()
+                    self.quality_changed()
                     for err in value.errors:
                         self.log("ISSUE: " + err)
                     for name in value.summary()["unmatched_vbo"]:
@@ -971,6 +1073,7 @@ class App:
                                                     "gopro_folder": "" if self._gopro_folder_automatic else self.gopro_folder.get(),
                                                     "include_gopro_subfolders": self.recursive_gopro.get(),
                                                     "overlay_mode": self.overlay_mode.get(), "scene_path": self.scene_path.get(),
+                                                    "prefer_lap": self.prefer_lap, "lap_padding": self.lap_padding.get(),
                                                     "overlap_only": self.overlap_only.get(),
                                                     "audio_source": SOUND[self.audio_source.get()],
                                                     "time_basis": self.time_basis.get(),

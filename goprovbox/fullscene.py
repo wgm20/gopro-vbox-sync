@@ -8,15 +8,14 @@ import re
 from PIL import Image, ImageDraw, ImageFilter
 
 from .gpmf import TelemetryError
-from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, FourChannelRenderer, Timeline
+from .overlay import parse_scene, scene_xml, numbers, datasource, scene_number, FourChannelRenderer, Timeline, CHANNELS
 from .lapdata import Session
+from .scene_math import SceneMath, parse_scene_math
 
 
 def scene_source(text):
-    """Recognize ordinary channels and the editor's two-axis resultant formula.
-
-    The mathematical form is fixed. Scene text is never evaluated as code.
-    """
+    """Recognize ordinary channels and bounded native numeric scene maths."""
+    text=text.strip()
     if not text.startswith("maths.eqn{"):
         return datasource(text)
     pattern=(r"maths\.eqn\{Sqrt\(\((?P<a>[A-Za-z_][A-Za-z0-9_]{0,63})\*\*2\)\+"
@@ -24,7 +23,7 @@ def scene_source(text):
              r"ds:(?P=a)\{(?P<first>[^{};]{1,256})\};ds:(?P=b)\{(?P<second>[^{};]{1,256})\}\}")
     match=re.fullmatch(pattern,text)
     if match is None or match['a']==match['b']:
-        raise TelemetryError("Unsupported scene datasource expression")
+        return parse_scene_math(text,datasource),1.0
     first,second=datasource(match['first']),datasource(match['second'])
     if ({first[0],second[0]}!={"vbox.lat_acc_smth_mps2","vbox.lng_acc_smth_mps2"}
             or not math.isclose(first[1],second[1],rel_tol=1e-12,abs_tol=0)):
@@ -140,7 +139,9 @@ def parse_full_scene(members, name="Scene", digest=""):
         time=config.find(".//times")
         offset=int(time.get("utc_local_offset_s",0)) if time is not None else 0
         if abs(offset)>=86400:raise TelemetryError("Invalid scene timezone offset")
-        result.options={"utc_offset":offset,"notes":[
+        result.options={"utc_offset":offset,
+            "maths_channel_units":{e.get("name","").lower():e.get("units","").lower() for e in config.findall(".//channels/channel") if e.get("name")},
+            "notes":[
             "Lap timing is reconstructed from the full source VBO, using its Start direction and a 25 m perpendicular gate; missing or incomplete laps show dashes.",
             "Delta is reconstructed against the fastest previously completed valid lap by GPS position; it is not the recorder's stored OLED prediction.",
             "G-ball GPS acceleration is calculated over a 0.4 s window; recorder smoothing may differ.",
@@ -208,12 +209,27 @@ class MapTransform:
     def point(self, p):return (self.offset[0]+(p[0]-self.minx)*self.scale,self.offset[1]+(self.maxy-p[1])*self.scale)
 
 
+def _recorded_channel_units(vbo):
+    # Match Timeline's VBO unit ordering, including the optional built-in entries.
+    standard={"sats","time","lat","long","velocity","heading","height","vert-vel","tsample",
+              "solution_type","avifileindex","avitime","avisynctime"}
+    custom=[column for column in vbo.columns if column not in standard]
+    marker=next((i for i,line in enumerate(vbo.preamble) if line.lower().strip()=="[channel units]"),None)
+    lines=[]
+    if marker is not None:
+        for line in vbo.preamble[marker+1:]:
+            if line.startswith("["):break
+            if line.strip():lines.append(line.strip().lower())
+    return dict(zip(custom,lines[-len(custom):])) if custom and len(lines)>=len(custom) else {}
+
+
 class FullSceneRenderer(FourChannelRenderer):
     def __init__(self, video, matches, width, height, scene):
         self.video,self.scene=video,scene
         self.timeline=Timeline(matches,scene.bindings)  # required channel/unit and ambiguity checks
         self.matches=matches
         self.sessions={m.vbo.path:Session(m.vbo) for m in matches}
+        recorded_units={path:_recorded_channel_units(session.vbo) for path,session in self.sessions.items()}
         supported={"vbox.speed_gnd_mps", "vbox.sats_used", "vbox.lat_acc_smth_mps2", "vbox.lng_acc_smth_mps2", "_resultant_acceleration",
                    "oled.plt_delta_t_ms", "laptiming.lap_time_ms", "lapresults.lap.session_best.lap_time_ms",
                    "lapresults.lap.previous.lap_time_ms", "lapresults.lap.previous.lap_number",
@@ -223,17 +239,27 @@ class FullSceneRenderer(FourChannelRenderer):
             for field in ("source", "xsource", "ysource"):
                 if field not in element:continue
                 source=element[field][0]
-                can=re.fullmatch(r"can\.bin\[\d+\]\.channel\(([^)]+)\)",source)
-                if can:
-                    for session in self.sessions.values():
-                        if can[1].lower() not in session.indices:
-                            raise TelemetryError(f"{session.vbo.path.name}: scene channel {can[1]} is missing")
-                elif source not in supported:
-                    raise TelemetryError(f"Unsupported scene data source in {element['name']}: {source}")
-                elif source=="vbox.sats_used":
-                    for session in self.sessions.values():
-                        if "sats" not in session.indices:
-                            raise TelemetryError(f"{session.vbo.path.name}: scene channel sats is missing")
+                leaves=source.sources() if isinstance(source,SceneMath) else (element[field],)
+                for key,_ in leaves:
+                    can=re.fullmatch(r"can\.bin\[\d+\]\.channel\(([^)]+)\)",key)
+                    if can:
+                        for session in self.sessions.values():
+                            column=can[1].lower()
+                            if column not in session.indices:
+                                raise TelemetryError(f"{session.vbo.path.name}: scene channel {can[1]} is missing")
+                            if isinstance(source,SceneMath):
+                                expected=scene.options.get("maths_channel_units",{}).get(column,"")
+                                if not expected and column in CHANNELS["rpm"]:expected="rpm"
+                                actual=recorded_units[session.vbo.path].get(column,"")
+                                if expected and actual!=expected:
+                                    raise TelemetryError(f"{session.vbo.path.name}: {can[1]} unit is {actual or 'unknown'}, scene expects {expected}")
+                    elif key not in supported:
+                        raise TelemetryError(f"Unsupported scene data source in {element['name']}: {key}")
+                    elif key in ("vbox.sats_used","vbox.speed_gnd_mps"):
+                        column="sats" if key=="vbox.sats_used" else "velocity"
+                        for session in self.sessions.values():
+                            if column not in session.indices:
+                                raise TelemetryError(f"{session.vbo.path.name}: scene channel {column} is missing")
         self.size=(width,height);self.position=(0,0)
         self.elements,self.scale=fit_layout(scene.elements,scene.size,width,height)
         self.blank=Image.new("RGBA",self.size)
@@ -261,9 +287,12 @@ class FullSceneRenderer(FourChannelRenderer):
 
     def source_value(self, source, session, utc, row, lap):
         key,scale=source
+        if isinstance(key,SceneMath):
+            value=key.evaluate(lambda binding:self.source_value(binding,session,utc,row,lap))
+            return value*scale if value is not None else None
         can=re.fullmatch(r"can\.bin\[\d+\]\.channel\(([^)]+)\)",key)
         if can:value=row.get(can[1].lower())
-        elif key=="vbox.speed_gnd_mps":value=row.get("velocity",0)/3.6
+        elif key=="vbox.speed_gnd_mps":value=row["velocity"]/3.6 if row.get("velocity") is not None else None
         elif key=="vbox.sats_used":value=row.get("sats")
         elif key=="vbox.lat_acc_smth_mps2":value=session.acceleration(utc,True)
         elif key=="vbox.lng_acc_smth_mps2":value=session.acceleration(utc)

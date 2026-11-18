@@ -1,5 +1,18 @@
 # Release notes
 
+## 1.6.0b18 — released 2026-11-18
+
+- Export the fastest complete lap covered by the ticked videos as one MP4 and its VBO. Choose another filmed lap, all matched footage or full videos beside **Create files**. The app remembers the opt-out and honours an existing full-video preference.
+- A lap starts and ends at the recorded start/finish crossings. Continuous GoPro chapters join into one video with aligned sound, gauges and data. **Options → Lap padding** adds up to two or five seconds on either side within continuous coverage.
+- The summary shows the run and lap time before encoding. If the selection contains no complete filmed lap, it shows the matched-footage fallback. The preview follows the footage for the chosen lap.
+- Supported full scenes can display calculated gear from speed and RPM using arithmetic and comparisons. Missing inputs or a telemetry gap leave the reading unavailable.
+
+## 1.6.0b17 — local build 2026-11-03
+
+- Supports scene maths made from numeric arithmetic and comparisons, including the Caterham calculated-gear display. The same calculation is used in the finished preview and exported video.
+- Checks the calculation's required data channels before rendering and leaves readings unavailable when inputs are missing, non-finite or separated by a telemetry gap. Expressions are parsed with fixed limits and are never executed as code.
+- Retains the existing resultant-G calculation and the original scene, telemetry, framing and sound behaviour.
+
 ## 1.6.0b16 — released 2026-10-31
 
 - Replaces individual crop choices with one shared crop for all ticked export videos. **Apply to selected videos** applies it to the selected batch; newly ticked files inherit the same crop, and turning **Crop to VBOX** off affects the whole selection. Different crops require separate exports.

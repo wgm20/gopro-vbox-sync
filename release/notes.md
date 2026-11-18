@@ -1,24 +1,11 @@
-# GoPro VBOX Sync 1.6.0b16 — 31 October 2026
+# GoPro VBOX Sync 1.6.0b18 — 18 November 2026
 
-Free, open-source Windows app for matching GoPro GPS video with VBOX telemetry. Cropping now uses one shared setting for all videos chosen for export.
+- Export the fastest complete lap covered by the ticked videos as one MP4 and its VBO. Choose another filmed lap, all matched footage or full videos beside **Create files**. The app remembers the opt-out and honours an existing full-video preference.
+- A lap starts and ends at the recorded start/finish crossings. Continuous GoPro chapters join into one video with aligned sound, gauges and data. **Options → Lap padding** adds up to two or five seconds on either side within continuous coverage.
+- The summary shows the run and lap time before encoding. If the selection contains no complete filmed lap, it shows the matched-footage fallback. The preview follows the footage for the chosen lap.
+- Supported full scenes can display calculated gear from speed and RPM using arithmetic and comparisons. Missing inputs or a telemetry gap leave the reading unavailable.
 
-- Tick the videos you want, open **Frame & preview…**, set the crop and click **Apply to selected videos**. Every ticked file uses that crop. Newly ticked files inherit it, and turning **Crop to VBOX** off applies to the whole selection.
-- **Preview video** chooses which ticked, matched file to inspect. The finished still in **Export preview** shows the shared crop with rotation, resolution and overlay applied. Choosing a different preview file does not change the crop or which files will be exported.
-- The framing editor states **Crop applies to all selected videos**. There is one crop choice for the selected batch; make separate exports when you want different crops.
-
-## Included from 1.6.0b13 — 30 October 2026
-
-The features introduced since the public 1.6.0b4 release remain available:
-
-- **Separate recording folders.** Choose **VBOX runs**, then point **GoPro videos** at an SD card, its DCIM folder or any other location. No copying is needed. GoPro videos uses the VBOX folder until you set a separate path, which the app remembers. Clearing it restores the VBOX folder. Subfolders are included by default; **Options → Include GoPro subfolders** remembers your choice. Source recordings stay unchanged, conflicting GoPro filenames are reported, and exports default to a new folder under VBOX runs. Command-line scans also support `--gopro-folder`, `--gopro-recursive` and `--no-gopro-recursive`.
-- **Choose footage before conversion.** GPS-based **Date** and **Start**, local/UTC display and sortable columns help compare recordings. **Best in file** is the fastest complete VBOX lap wholly within that GoPro file's GPS time range; split laps are excluded and **—** means none. A separate red star (**★**) marks footage of the whole-run fastest lap. Both files are marked if it crosses a chapter boundary, independently of their per-file best times. **Options → Details…** shows the whole-run best and explains coverage or missing times.
-- **A simpler main window.** Set both source paths, then click **Scan for matches** beneath them. **Options** beside **Help** holds **Resolution**, **Overlay**, **Sound**, **Only export video with VBOX data**, **Include GoPro subfolders**, **Details…** and **What do red stars mean?**. Framing, Scene, Save to and Create files remain in the main window.
-- **New VVHSN scene import.** The app uses the public scene importer in a compatible **VBOX Video Setup** installation and its **.NET 8 Windows Desktop Runtime**. A previously imported copy is not required. The app supplies its own helper; users do not need PowerShell 7 or a .NET SDK. More older scene layouts are supported, with unsupported widgets, channels or units explained before export. Choose **Options → Overlay → Full scene · no rear camera**, select your scene, then check **Frame & preview…**.
-- **Reusable saved scenes.** A **.gvscene** package contains configuration, artwork and fonts from an earlier import. It supports previews and full-scene exports without VBOX Video Setup. No vendor libraries or private scene packages are bundled. **Driving data** with Scene blank still uses the built-in dashboard.
-
-Lap times are reconstructed from VBOX data using the overlay's timing method and may differ from the recorder. Incomplete laps and laps crossing data gaps are excluded. Scene rendering covers a tested subset; inspect the preview before exporting.
-
-**Start here:** download **GoPro-VBOX-Sync-1.6.0b16-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
+**Start here:** download **GoPro-VBOX-Sync-1.6.0b18-Setup.exe**, install, then choose **Help → Try practice recordings**. No Python, payment, activation or GitHub account is required. Video tools download on request (110 MB); the illustrated guide works offline. Windows 10/11 x64. The installer is unsigned. For the portable ZIP, extract the entire folder before opening GoProVBOXSync.exe.
 
 **Beta limitation:** Circuit Tools 3 can reject generated VBO files with an authenticity/checksum error and may close. This remains unresolved; re-encoding is not a proven fix. Test a short recording first. Originals are preserved, and the exported MP4 also plays in ordinary video players.
 

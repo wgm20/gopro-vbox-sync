@@ -24,7 +24,11 @@ def main(argv=None):
     parser.add_argument("--rotate", action="append", default=[], metavar="FILENAME=DEGREES", help="Override rotation, clockwise 0/90/180/270; repeat per file")
     parser.add_argument("--crop", choices=["none", "top", "bottom", "centre"], default="none",
                         help="Match the original VBOX video's shape: remove top, bottom, or centre crop")
-    parser.add_argument("--full-video", action="store_true", help="Keep full videos instead of only periods with matching VBOX data")
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument("--all-matched", action="store_true", help="Export all footage with matching VBOX data instead of the fastest fully filmed lap")
+    scope.add_argument("--full-video", action="store_true", help="Keep full videos instead of only periods with matching VBOX data")
+    parser.add_argument("--lap-padding", choices=(0, 2, 5), type=int, default=0,
+                        help="Extra seconds on each side of the lap, limited to continuous footage")
     parser.add_argument("--audio", choices=["vbox", "gopro"], default="vbox",
                         help="Sound source: VBOX by default, with GoPro sound for gaps")
     parser.add_argument("--overlay", action="store_true", help="Burn speed, RPM, throttle and brake into encoded video")
@@ -65,6 +69,7 @@ def main(argv=None):
         export(scan, args.output, rotations=rotations, max_size=args.max_size, encoder=args.encoder,
                crops={v.path.name: args.crop for v in scan.videos},
                overlap_only=not args.full_video, audio_source=args.audio,
+               lap=None if args.all_matched or args.full_video else "fastest", lap_padding=args.lap_padding,
                log=print, progress=progress, telemetry_overlay=args.overlay, overlay_scene=args.scene, overlay_mode=args.overlay_mode)
         return 0
     except (KeyboardInterrupt, InterruptedError):

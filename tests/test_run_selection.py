@@ -136,6 +136,8 @@ class RunSelectionTests(unittest.TestCase):
         self.assertIn('first.MP4', self.app.included_videos)
 
     def test_details_inspects_an_excluded_highlight_without_changing_the_export_target(self):
+        self.app.range_combo.set("All matched footage")
+        self.app.change_range()
         self.app.tree.selection_set('1'); self.app.select_video()
         self.app.toggle_include('0')
         self.app.tree.selection_set('0'); self.app.select_video()
@@ -161,12 +163,47 @@ class RunSelectionTests(unittest.TestCase):
         self.app.sort_rows('lap', True)
         self.assertEqual(self.app.tree.get_children(), ('1', '0', '2'))
 
+    def test_lap_default_preview_opt_out_and_no_lap_fallback(self):
+        app = self.app
+        app.folder.set(str(self.folder))
+        self.assign_scan(self.clips)
+        app.update_selection_summary(); app.sync_export_preview(); app.quality_changed()
+        self.assertEqual(app.range_label.get(), "Fastest filmed lap")
+        self.assertAlmostEqual(app.active_lap.duration, 18, places=2)
+        self.assertEqual(app.export_video().path.name, "second.MP4")
+        self.assertIn("0:18.000", app.summary.get())
+        self.assertIn("Lap", Path(app.output.get()).name)
+        alternate = next(label for label, lap in app.lap_choices.items() if lap.duration > 19)
+        app.range_combo.set(alternate); app.change_range()
+        self.assertAlmostEqual(app.active_lap.duration, 20, places=2)
+        self.assertEqual(app.export_video().path.name, "first.MP4")
+        app.range_combo.set("All matched footage"); app.change_range()
+        self.assertIsNone(app.active_lap)
+        self.assertTrue(Path(app.output.get()).name.endswith(" Matched"))
+        self.assertEqual(len(app.export_candidates()), 3)
+        app.save_preferences()
+        prefs = json.loads(app.preferences.read_text())
+        self.assertFalse(prefs["prefer_lap"])
+        app.range_combo.set("Full videos"); app.change_range()
+        self.assertFalse(app.overlap_only.get())
+        app.range_combo.set("Fastest filmed lap"); app.change_range()
+        app.included_videos = {"later.MP4"}; app.range_changed()
+        self.assertIsNone(app.active_lap)
+        self.assertIn("No complete filmed lap", app.summary.get())
+        self.assertTrue(app.create.instate(["!disabled"]))
+        app.set_busy(True)
+        self.assertTrue(app.range_combo.instate(["disabled"]))
+
     def test_table_is_scrollable_at_minimum_size_and_new_controls_fit(self):
         self.root.deiconify(); self.root.geometry('880x740'); self.root.update()
         self.assertTrue(self.app.tree.cget('xscrollcommand'))
         self.assertTrue(self.app.tree.cget('yscrollcommand'))
         self.assertGreaterEqual(self.app.tree.winfo_height(), 150)
-        for control in (self.app.time_combo, self.app.create, self.app.open_result):
+        for left, right in ((self.app.range_combo, self.app.create), (self.app.create, self.app.stop),
+                            (self.app.stop, self.app.open_report), (self.app.open_report, self.app.open_result)):
+            self.assertLessEqual(left.winfo_rootx() + left.winfo_width(), right.winfo_rootx())
+            self.assertGreater(right.winfo_width(), 1)
+        for control in (self.app.time_combo, self.app.create, self.app.range_combo, self.app.open_result):
             self.assertLessEqual(control.winfo_rooty() + control.winfo_height(),
                                  self.root.winfo_rooty() + self.root.winfo_height())
 

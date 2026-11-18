@@ -43,10 +43,11 @@ class FramingPreview:
         return frame
 
 
-def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path, destination, cancel):
+def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path, destination, cancel, seconds=None):
     """Decode once; dragging reuses the source and export-sized gauge artwork."""
     from .overlay import load_scene, Renderer
-    seconds = video.clock.media_time((matches[0].rows[0].utc + matches[0].rows[-1].utc) / 2) if matches else video.duration / 2
+    if seconds is None:
+        seconds = video.clock.media_time((matches[0].rows[0].utc + matches[0].rows[-1].utc) / 2) if matches else video.duration / 2
     seconds = max(0, min(seconds, max(0, video.duration - .1)))
     upright = (video.height, video.width) if rotation % 180 else (video.width, video.height)
     preview(video.path, seconds, rotation, destination, output_size=upright)
@@ -70,7 +71,7 @@ def prepare_preview(video, matches, rotation, max_size, aspect, mode, scene_path
 
 
 def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, scene_path,
-                           destination, cancel, choice):
+                           destination, cancel, choice, seconds=None):
     """Save the cropped, composited export still and return its pixel size.
 
     Keep the decoded source separate from the published preview so a failed or
@@ -94,7 +95,7 @@ def prepare_output_preview(video, matches, rotation, max_size, aspect, mode, sce
         temporary = Path(temporary)
         prepared = prepare_preview(video, matches, rotation, max_size,
                                    aspect if crop is not None else None, mode, scene_path,
-                                   temporary / "source.png", cancel)
+                                   temporary / "source.png", cancel, **({"seconds": seconds} if seconds is not None else {}))
         frame = prepared.output(choice, size).convert("RGB")
         if cancel.is_set():
             raise InterruptedError("Cancelled")

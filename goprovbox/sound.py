@@ -133,14 +133,14 @@ def _metadata(path, cache):
     return cache[key]
 
 
-def plan_audio(video, matches, cache=None):
+def plan_audio(video, matches, cache=None, *, prefer_vbox=True):
     """Prefer linked VBOX sound; use GoPro sound or silence in uncovered periods."""
     cache = {} if cache is None else cache
     count = round(video.duration * RATE)
     candidates, sources, clocks, notes = [], {}, [], []
     vbos = {m.vbo.path: m.vbo for m in matches}
     lo, hi = video.clock.utc(0), video.clock.utc(video.duration)
-    for vbo in vbos.values():
+    for vbo in (vbos.values() if prefer_vbox else ()):
         prefix, extension = video_reference(vbo)
         files = {p.name.casefold(): p for p in vbo.path.parent.iterdir() if p.is_file()}
         vi, ti = vbo.index("avifileindex"), vbo.index("avitime", "avisynctime")
@@ -233,11 +233,11 @@ def plan_audio(video, matches, cache=None):
     return AudioPlan(count, spans, sources, clocks, list(dict.fromkeys(notes)))
 
 
-def _process(args, log_path, cancel, consume=lambda block: None):
+def _process(args, log_path, cancel, consume=lambda block: None, *, cwd=None, activity="Sound preparation"):
     """Drain a subprocess without holding an entire recording in memory."""
     with log_path.open("wb") as err:
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=err, stdin=subprocess.DEVNULL,
-                             creationflags=CREATE_NO_WINDOW)
+                             creationflags=CREATE_NO_WINDOW, cwd=cwd)
         blocks = queue.Queue(maxsize=8)
         stopped = Event()
         def reader():
@@ -265,7 +265,7 @@ def _process(args, log_path, cancel, consume=lambda block: None):
                 consume(block); last = time.monotonic()
             p.wait(timeout=30)
             if p.returncode:
-                raise TelemetryError("Sound preparation failed: " + log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
+                raise TelemetryError(activity + " failed: " + log_path.read_text(encoding="utf-8", errors="replace")[-2000:])
         finally:
             stopped.set()
             if p.poll() is None:

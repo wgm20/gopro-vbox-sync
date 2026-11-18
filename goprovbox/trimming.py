@@ -65,11 +65,13 @@ def video_parts(video: Video, matches, overlap_only=True) -> list[Part]:
             merged[-1] = (merged[-1][0], max(stop, merged[-1][1]))
         else:
             merged.append((first, stop))
-    parts = []
-    for first, stop in merged:
-        start = float(first / fps)
-        clock = replace(video.clock, origin=video.clock.utc(start),
-                        first_fix=video.clock.first_fix - start, last_fix=video.clock.last_fix - start)
-        view = replace(video, duration=float((stop - first) / fps), clock=clock)
-        parts.append(Part(video, view, start, stop - first))
-    return parts
+    return [frame_part(video, first, stop) for first, stop in merged]
+
+
+def frame_part(video, first, stop):
+    fps = Fraction(video.fps)
+    start = float(first / fps)
+    clock = replace(video.clock, origin=video.clock.utc(start),
+                    first_fix=video.clock.first_fix - start, last_fix=video.clock.last_fix - start)
+    view = replace(video, duration=float((stop - first) / fps), clock=clock)
+    return Part(video, view, start, stop - first)

@@ -72,6 +72,8 @@ class SelectionTests(ExportTestCase):
     def gui_export_app(self, included, crop_choice):
         from goprovbox.gui import App
         app = App.__new__(App)
+        app.active_lap = None
+        app.lap_padding = Mock(); app.lap_padding.get.return_value = 0
         app.scan = self.scan
         app.included_videos = set(included)
         app.output = Mock(); app.output.get.return_value = str(self.folder / 'out')
