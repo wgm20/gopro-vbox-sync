@@ -511,6 +511,9 @@ def export(scan: Scan, output: Path | None = None, *, rotations: dict[str, int] 
         else:
             choice = next((item for item in options if item.key == lap), None)
             if choice is None:
+                # Earlier versions identified a lap by the first chapter in its recording.
+                choice = next((item for item in options if (item.run, item.number, item.coverage[0].video) == lap), None)
+            if choice is None:
                 raise TelemetryError("The selected lap is no longer fully covered. Choose another lap or all matched footage.")
     spans = {}
     if choice:

@@ -47,7 +47,7 @@ class FilmedLap:
 
     @property
     def key(self):
-        return self.run, self.number, self.coverage[0].video
+        return self.run, self.number, self.spans()[0].video
 
     def spans(self, padding=0):
         start, end = self.start - padding, self.end + padding

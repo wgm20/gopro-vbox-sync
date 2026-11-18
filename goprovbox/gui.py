@@ -5,7 +5,6 @@ from pathlib import Path
 from threading import Event, Thread
 from copy import deepcopy
 import json
-import math
 import os
 import queue
 import subprocess
@@ -14,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import traceback
 import webbrowser
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageTk
 
 from . import __version__
 from .engine import scan_folder, export, safe_stem
@@ -22,7 +21,7 @@ from .lapexport import filmed_laps
 from .reports import export_report_path
 from .crop import rectangle
 from .runinfo import video_run_info
-from .selection import TIME_BASES, lap_time, moment, row_values, recording_details
+from .selection import lap_time, moment, row_values, recording_details
 from .distribution import (asset, data_directory, tools_ready, download_tools, copy_demo,
                            uninstall_command, DOWNLOAD_PAGE, RELEASES, REPOSITORY)
 
@@ -31,12 +30,12 @@ QUALITY = {"HD · 1920 px": 1920, "Full resolution": 0, "Compact · 1280 px": 12
 OVERLAYS = {"None": "none", "Driving data": "four", "Full scene · no rear camera": "full"}
 SOUND = {"VBOX (GoPro for gaps)": "vbox", "GoPro": "gopro"}
 TABLE_COLUMNS = (("include", "Include", 58), ("video", "GoPro", 126), ("vbox", "VBOX", 112),
-                 ("date", "Date", 94), ("start", "Start", 82),
+                 ("date", "Date", 94), ("start", "Start (local)", 105),
                  ("lap", "Best in file", 102), ("overlap", "Overlap", 82))
 FASTEST = "Fastest filmed lap"
 MATCHED = "All matched footage"
 FULL = "Full videos"
-FASTEST_COLOR = "#c62828"
+
 
 
 
@@ -47,17 +46,24 @@ def open_path(path: Path):
         subprocess.Popen(["open" if __import__("sys").platform == "darwin" else "xdg-open", str(path)])
 
 
-def fastest_star(root):
-    size = max(14, round(root.winfo_fpixels("12p")))
-    scale = size * 4
-    icon = Image.new("RGBA", (scale, scale))
-    points = []
-    for point in range(10):
-        angle = -math.pi / 2 + point * math.pi / 5
-        radius = scale * (.46 if point % 2 == 0 else .20)
-        points.append((scale / 2 + math.cos(angle) * radius, scale / 2 + math.sin(angle) * radius))
-    ImageDraw.Draw(icon).polygon(points, fill=FASTEST_COLOR)
-    return ImageTk.PhotoImage(icon.resize((size, size), Image.Resampling.LANCZOS), master=root)
+class HintEntry(ttk.Entry):
+    """Show guidance in an empty field without putting it in the path variable."""
+    def __init__(self, parent, variable, hint):
+        super().__init__(parent, textvariable=variable)
+        self.variable = variable
+        self.hint = tk.Label(self, text=hint, anchor="w", foreground="#526478",
+                             background="white", borderwidth=0, font=("Segoe UI", 10))
+        self.hint.bind("<Button-1>", lambda _: self.focus_set() if self.instate(["!disabled"]) else None)
+        self.bind("<FocusIn>", lambda _: self.hint.place_forget())
+        self.bind("<FocusOut>", self.update_hint)
+        variable.trace_add("write", self.update_hint)
+        self.update_hint()
+
+    def update_hint(self, *_):
+        if self.variable.get() or str(self.tk.call("focus")) == str(self):
+            self.hint.place_forget()
+        else:
+            self.hint.place(x=6, rely=.5, anchor="w", relwidth=1, width=-12)
 
 
 class App:
@@ -73,6 +79,7 @@ class App:
         self.rotations = {}
         self.crop_choice = "none"
         self.included_videos = set()
+        self.auto_lap_selection = False
         self.preview_generation = 0
         self.preview_image = None
         self.preview_source = None
@@ -120,13 +127,10 @@ class App:
         self.overlay_mode = tk.StringVar(value=prefs.get("overlay_mode", "Driving data" if prefs.get("overlay_enabled") else "None"))
         if self.overlay_mode.get() not in OVERLAYS: self.overlay_mode.set("None")
         self.scene_path = tk.StringVar(value=prefs.get("scene_path", ""))
-        self.time_basis = tk.StringVar(value=prefs.get("time_basis", "Local time"))
-        if self.time_basis.get() not in TIME_BASES:
-            self.time_basis.set("Local time")
         self.run_detail = tk.StringVar()
         self.export_video_name = tk.StringVar()
         self.preview_title = tk.StringVar(value="Tick a video to preview its export")
-        self.status = tk.StringVar(value="Choose both folders above, then click Scan for matches.")
+        self.status = tk.StringVar()
         self.summary = tk.StringVar(value="")
         root.title(f"GoPro VBOX Sync {__version__}")
         width = min(1320, max(880, root.winfo_screenwidth() - 80))
@@ -172,25 +176,21 @@ class App:
         ttk.Label(main, text="Choose recording folders", font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0,6))
         line = ttk.Frame(main); line.pack(fill="x")
         ttk.Label(line, text="VBOX runs", width=12).pack(side="left")
-        self.source_entry = ttk.Entry(line, textvariable=self.folder); self.source_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        self.source_entry = HintEntry(line, self.folder, "Folder with .vbo runs and any original VBOX video (.MP4 or .AVI)"); self.source_entry.pack(side="left", fill="x", expand=True, ipady=5)
         self.browse = ttk.Button(line, text="Browse…", command=self.choose_folder); self.browse.pack(side="left", padx=(8,0))
         goprorow = ttk.Frame(main); goprorow.pack(fill="x", pady=(6,0))
         ttk.Label(goprorow, text="GoPro videos", width=12).pack(side="left")
-        self.gopro_entry = ttk.Entry(goprorow, textvariable=self.gopro_folder)
+        self.gopro_entry = HintEntry(goprorow, self.gopro_folder, "Folder or SD card with original GoPro videos (.MP4), often in DCIM")
         self.gopro_entry.pack(side="left", fill="x", expand=True, ipady=5)
         self.gopro_browse = ttk.Button(goprorow, text="Browse…", command=self.choose_gopro_folder)
         self.gopro_browse.pack(side="left", padx=(8,0))
         sources = ttk.Frame(main); sources.pack(fill="x", pady=(6,0))
         self.scan_button = ttk.Button(sources, text="Scan for matches", style="Accent.TButton", command=self.begin_scan)
         self.scan_button.pack(side="right")
-        ttk.Label(sources, text="Find matching runs before choosing\nvideos to convert.", justify="left",
+        ttk.Label(sources, text="Both recordings can be in the same folder.", justify="left",
                   foreground="#526478").pack(side="right", padx=(12,16))
         summaryrow = ttk.Frame(main); summaryrow.pack(fill="x", pady=(8,6))
         ttk.Label(summaryrow, textvariable=self.summary).pack(side="left")
-        self.time_combo = ttk.Combobox(summaryrow, textvariable=self.time_basis, values=TIME_BASES,
-                                      state="readonly", width=11)
-        self.time_combo.pack(side="right")
-        ttk.Label(summaryrow, text="Times").pack(side="right", padx=(12,8))
         footer = ttk.Frame(main, padding=(0,12,0,0)); footer.pack(side="bottom", fill="x")
         self.panes = panes = ttk.Panedwindow(main, orient="horizontal"); panes.pack(fill="both", expand=True)
         left = ttk.Frame(panes); right = ttk.Frame(panes, padding=(16,0,0,0))
@@ -198,15 +198,11 @@ class App:
         table = ttk.Frame(left); table.pack(fill="both", expand=True)
         table.rowconfigure(0, weight=1); table.columnconfigure(0, weight=1)
         self.tree = ttk.Treeview(table, columns=tuple(c[0] for c in TABLE_COLUMNS),
-                                 show="tree headings", height=5, selectmode="browse")
-        self.fastest_lap_star = fastest_star(root)
-        self.tree.column("#0", width=28, minwidth=28, stretch=False, anchor="center")
-        self.tree.heading("#0", text="")
+                                 show="headings", height=5, selectmode="browse")
         for key, text, width in TABLE_COLUMNS:
             self.tree.heading(key, text=text, command=lambda column=key: self.sort_rows(column))
             self.tree.column(key, width=width, minwidth=width, stretch=key in ("video", "vbox"),
                              anchor="center" if key == "include" else "w")
-        self.tree.tag_configure("fastest", background="#e6f3eb")
         self.tree.grid(row=0, column=0, sticky="nsew")
         vertical = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         vertical.grid(row=0, column=1, sticky="ns")
@@ -238,16 +234,16 @@ class App:
         ttk.Label(preview_controls, textvariable=self.crop_note, wraplength=360).pack(anchor="w", pady=(4,0))
         ttk.Label(preview_controls, textvariable=self.run_detail, wraplength=360, justify="left").pack(anchor="w", pady=(4,0))
         self.scenerow = ttk.Frame(footer)
-        ttk.Label(self.scenerow, text="Scene", width=9).pack(side="left")
-        self.scene_entry = ttk.Entry(self.scenerow, textvariable=self.scene_path)
+        ttk.Label(self.scenerow, text="Scene file", width=12).pack(side="left")
+        self.scene_entry = HintEntry(self.scenerow, self.scene_path, "")
         self.scene_entry.pack(side="left", fill="x", expand=True, ipady=5)
-        self.scene_entry.bind("<FocusOut>", self.refresh_export_preview)
+        self.scene_entry.bind("<FocusOut>", self.refresh_export_preview, add="+")
         self.scene_entry.bind("<Return>", self.refresh_export_preview)
         self.scene_button = ttk.Button(self.scenerow, text="Choose…", command=self.choose_scene)
         self.scene_button.pack(side="left", padx=(8,0))
         self.outrow = ttk.Frame(footer); self.outrow.pack(fill="x", pady=(2,10))
-        ttk.Label(self.outrow, text="Save to", width=9).pack(side="left")
-        self.output_entry = ttk.Entry(self.outrow, textvariable=self.output); self.output_entry.pack(side="left", fill="x", expand=True, ipady=5)
+        ttk.Label(self.outrow, text="Export folder", width=12).pack(side="left")
+        self.output_entry = HintEntry(self.outrow, self.output, "Destination for the exported video and VBOX data"); self.output_entry.pack(side="left", fill="x", expand=True, ipady=5)
         self.output_button = ttk.Button(self.outrow, text="Choose…", command=self.choose_output); self.output_button.pack(side="left", padx=(8,0))
         self.progress = ttk.Progressbar(footer, maximum=100); self.progress.pack(fill="x", pady=(2,7))
         ttk.Label(footer, textvariable=self.status).pack(anchor="w")
@@ -265,7 +261,6 @@ class App:
         self.folder.trace_add("write", self.folder_changed)
         self.gopro_folder.trace_add("write", self.gopro_folder_changed)
         self.recursive_gopro.trace_add("write", self.source_changed)
-        self.time_basis.trace_add("write", self.refresh_rows)
         self.folder_changed(); self.overlay_changed()
         root.after_idle(self.place_selection_panes)
         root.protocol("WM_DELETE_WINDOW", self.close); root.after(100, self.poll)
@@ -303,15 +298,6 @@ class App:
         self.options_menu.add_checkbutton(label="Include GoPro subfolders", variable=self.recursive_gopro)
         self.options_menu.add_separator()
         self.options_menu.add_command(label="Details…", command=self.show_details)
-        self.options_menu.add_command(label="What do red stars mean?…", command=self.show_lap_help)
-
-    def show_lap_help(self):
-        messagebox.showinfo("Red stars and lap times",
-            "Best in file is the fastest complete lap entirely inside that GoPro file, using GPS timestamps "
-            "and the VBOX start/finish crossings. A dash means no complete lap is available.\n\n"
-            "A red star marks footage of a VBOX run's overall fastest lap. If it spans two GoPro files, "
-            "both are starred; include both for the complete lap. Their Best in file times can still differ.\n\n"
-            "Open Options → Details for lap times, timestamps, file coverage and the scan log.", parent=self.root)
 
     def open_help(self):
         open_path(asset("quick-start.html"))
@@ -405,7 +391,7 @@ class App:
         text=tk.Text(window,wrap="word",padx=16,pady=16,font=("Consolas",10))
         text.pack(fill="both",expand=True)
         video = self.selected_video()
-        details = recording_details(video.path.name, video_run_info(self.scan, video), self.time_basis.get()) if video else ""
+        details = recording_details(video.path.name, video_run_info(self.scan, video)) if video else ""
         logs = "\n".join(self.log_messages) or "No scan yet."
         text.insert("end", details + "\n\nScan and export log\n\n" + logs if details else logs)
         text.configure(state="disabled")
@@ -423,13 +409,11 @@ class App:
             row = str(index)
             info = video_run_info(self.scan, video)
             self.selection_data[row] = info
-            values = row_values(video.path.name, info, video.path.name in self.included_videos, self.time_basis.get())
-            tags = ("fastest",) if info["contains_fastest"] else ()
-            marker = self.fastest_lap_star if info["contains_fastest"] else ""
+            values = row_values(video.path.name, info, video.path.name in self.included_videos)
             if self.tree.exists(row):
-                self.tree.item(row, values=values, tags=tags, image=marker)
+                self.tree.item(row, values=values)
             else:
-                self.tree.insert("", "end", iid=row, values=values, tags=tags, image=marker)
+                self.tree.insert("", "end", iid=row, values=values)
         self.sort_rows(self.sort_column, self.sort_reverse)
         self.sync_export_preview()
 
@@ -533,7 +517,7 @@ class App:
         best = info["fastest_lap"]
         description = (f"Best in file {lap_time(best['duration_seconds'])} · {info['fastest_run']}"
                        if best else "No complete lap in this file · Options → Details")
-        self.run_detail.set("Recorded " + moment(info["utc_start"], self.time_basis.get()) + "\n" + description)
+        self.run_detail.set("Recorded " + moment(info["utc_start"]) + "\n" + description)
 
     def resize_preview(self, event=None):
         if self.preview_source is None or self.closing:
@@ -568,6 +552,11 @@ class App:
         self._gopro_folder_automatic = not self.gopro_folder.get().strip()
         self.source_changed()
 
+    def scan_prompt(self):
+        if not self.folder.get().strip():
+            return "Choose the VBOX runs folder to start."
+        return "Click Scan for matches to match the GoPro videos to the VBOX runs."
+
     def source_changed(self, *_):
         if self.busy:
             return
@@ -580,7 +569,7 @@ class App:
         self.rotations.clear(); self.crop_choice = "none"; self.crop_note.set("")
         self.clear_export_preview()
         self.open_result.configure(state="disabled"); self.open_report.configure(state="disabled")
-        self.status.set("Choose both folders above, then click Scan for matches.")
+        self.status.set(self.scan_prompt())
         self.quality_changed()
         self.set_busy(False)
 
@@ -597,18 +586,23 @@ class App:
         self.range_changed()
 
     def range_changed(self):
+        previous = self.included_videos.copy()
         self.update_selection_summary()
+        if previous != self.included_videos:
+            self.refresh_rows()
         self.quality_changed()
         self.sync_export_preview()
 
     def update_selection_summary(self):
-        choices = (filmed_laps(self.scan, self.included_videos)
+        pool = ({match.video.path.name for match in self.scan.matches}
+                if self.scan and self.auto_lap_selection else self.included_videos)
+        choices = (filmed_laps(self.scan, pool)
                    if self.scan and getattr(self.scan, "run_info", None) else [])
         self.lap_choices = {}
         for lap in sorted(choices, key=lambda x: (x.run, x.number, x.key)):
             label = f"{Path(lap.run).stem} · Lap {lap.number} · {lap_time(lap.duration)}"
             if label in self.lap_choices:
-                label += f" · {lap.coverage[0].video}"
+                label += f" · {lap.key[2]}"
             self.lap_choices[label] = lap
         self.active_lap = None
         label = MATCHED if self.overlap_only.get() else FULL
@@ -620,6 +614,9 @@ class App:
             else:
                 self.explicit_lap = None
                 self.active_lap = choices[0] if choices else None
+        if self.auto_lap_selection and self.scan:
+            self.included_videos = ({span.video for span in self.active_lap.spans(self.lap_padding.get())}
+                                    if self.active_lap else set(pool))
         self.range_label.set(label)
         self.range_combo.configure(values=(FASTEST, MATCHED, FULL, *self.lap_choices))
         if self.scan and self.active_lap:
@@ -646,6 +643,7 @@ class App:
         if not any(m.video is video for m in self.scan.matches):
             return
         name = video.path.name
+        self.auto_lap_selection = False
         if name in self.included_videos:
             self.included_videos.remove(name)
         else:
@@ -698,6 +696,9 @@ class App:
     def overlay_changed(self, *_):
         mode=OVERLAYS[self.overlay_mode.get()]
         if mode != "none":
+            hint = ("Choose a VBOX scene (.VVHSN) or a saved scene (.gvscene)" if mode == "full" else
+                    "Leave blank for the built-in dashboard, or choose a .VVHSN or .gvscene file")
+            self.scene_entry.hint.configure(text=hint)
             self.scenerow.pack(fill="x", pady=(0,10), before=self.outrow)
             if mode == "full" and not self.scene_path.get().strip():
                 folder=Path(self.folder.get()).parent / "Scenes"
@@ -709,7 +710,7 @@ class App:
 
     def choose_scene(self):
         initial = Path(self.folder.get()).parent / "Scenes"
-        name = filedialog.askopenfilename(title="Choose a scene", initialdir=str(initial) if initial.is_dir() else None,
+        name = filedialog.askopenfilename(title="Choose a VBOX scene (.VVHSN) or saved scene (.gvscene)", initialdir=str(initial) if initial.is_dir() else None,
                                           filetypes=[("VBOX and saved scenes", "*.vvhsn *.VVHSN *.gvscene *.GVSCENE"),
                                                      ("Saved scene", "*.gvscene *.GVSCENE"),
                                                      ("VBOX HD2 scene", "*.vvhsn *.VVHSN")])
@@ -761,12 +762,12 @@ class App:
         self.worker(work)
 
     def choose_folder(self):
-        value = filedialog.askdirectory(title="Choose the folder with your VBOX runs", initialdir=self.folder.get() or None)
+        value = filedialog.askdirectory(title="Choose the folder containing your VBOX run files (.vbo)", initialdir=self.folder.get() or None)
         if value:
             self.folder.set(value)
 
     def choose_gopro_folder(self):
-        value = filedialog.askdirectory(title="Choose the SD card or folder with your GoPro videos",
+        value = filedialog.askdirectory(title="Choose the folder or SD card containing original GoPro videos (.MP4)",
                                         initialdir=self.gopro_folder.get() or self.folder.get() or None)
         if value:
             self.gopro_folder.set(value)
@@ -785,7 +786,6 @@ class App:
             widget.configure(state="disabled" if busy else "normal")
         for widget in (self.gopro_entry, self.gopro_browse):
             widget.configure(state="disabled" if busy else "normal")
-        self.time_combo.configure(state="disabled" if busy else "readonly")
         for label in ("Resolution", "Overlay", "Sound", "Only export video with VBOX data", "Include GoPro subfolders"):
             self.options_menu.entryconfigure(label, state="disabled" if busy else "normal")
         for menu in (self.resolution_menu, self.overlay_menu, self.sound_menu):
@@ -1009,7 +1009,7 @@ class App:
                     self.progress["value"] = value * 100
                     self.status.set(f"Downloading and checking video tools · {value:.0%}")
                 elif kind == "tools_ready":
-                    self.status.set("Video tools ready. Choose both folders, then click Scan for matches.")
+                    self.status.set("Video tools ready. " + self.scan_prompt())
                     if value and not self.closing: self.root.after(0, value)
                 elif kind == "export_preview":
                     generation, destination, output_size, caption = value
@@ -1029,7 +1029,7 @@ class App:
                         self.preview_label.configure(image="", text="Export preview unavailable.\n" + message[:180])
                 elif kind == "scan":
                     self.scan = value
-                    self.included_videos = {m.video.path.name for m in value.matches}
+                    self.auto_lap_selection = True
                     self.update_selection_summary()
                     self.refresh_rows()
                     self.quality_changed()
@@ -1082,7 +1082,6 @@ class App:
                                                     "prefer_lap": self.prefer_lap, "lap_padding": self.lap_padding.get(),
                                                     "overlap_only": self.overlap_only.get(),
                                                     "audio_source": SOUND[self.audio_source.get()],
-                                                    "time_basis": self.time_basis.get(),
                                                     "welcomed": self.welcomed}), encoding="utf-8")
         except OSError:
             pass

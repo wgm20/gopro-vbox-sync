@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.6.0b20 — released 2026-11-18
+
+- After a scan, **Fastest filmed lap** ticks the camera files needed for the quickest complete filmed lap across all runs. It includes both chapters for a split lap and accounts for the selected padding. Choose another lap or change the ticks yourself.
+- The table starts with **Include** and shows **Start (local)**. The export summary identifies the chosen run, lap and time.
+- Empty recording fields explain which folders to choose. The **Scene file** field names the .VVHSN and .gvscene formats. **Export folder** identifies the destination.
+
 ## 1.6.0b19 — released 2026-11-18
 
 - In **Options → Overlay → Driving data**, leave **Scene** blank to show the gauges available in each VBOX recording. Speed, RPM, throttle and brake appear independently. The panel fits the gauges in use.

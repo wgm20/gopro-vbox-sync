@@ -104,17 +104,11 @@ class OptionsMenuTests(unittest.TestCase):
         app.options_menu.invoke('Include GoPro subfolders')
         self.assertEqual((app.quality.get(), app.overlay_mode.get(), app.audio_source.get(),
                           app.overlap_only.get(), app.recursive_gopro.get()), original)
-        for label in ('Details…', 'What do red stars mean?…'):
-            self.assertEqual(app.options_menu.entrycget(label, 'state'), 'normal')
+        self.assertEqual(app.options_menu.entrycget('Details…', 'state'), 'normal')
         app.options_menu.invoke('Details…')
         details = [window for window in self.root.winfo_children()
                    if isinstance(window, tk.Toplevel) and window.title() == 'Scan and export details']
         self.assertEqual(len(details), 1)
-        with patch('goprovbox.gui.messagebox.showinfo') as explain:
-            app.options_menu.invoke('What do red stars mean?…')
-        self.assertEqual(explain.call_args.args[0], 'Red stars and lap times')
-        self.assertIn('Best in file', explain.call_args.args[1])
-        self.assertIn('VBOX', explain.call_args.args[1])
         app.set_busy(False)
         for label in mutating:
             self.assertEqual(app.options_menu.entrycget(label, 'state'), 'normal')

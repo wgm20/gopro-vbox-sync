@@ -79,9 +79,10 @@ def run_self_test(destination: Path, *, scene_path: Path | None = None):
         app.scene_path.set(str(scene_path))
     app.overlay_changed()
     app.scan = scan; app.included_videos = {chosen}
-    app.time_basis.set("UTC")
-    assert app.tree.set("0", "date") == "2026-01-01"
-    assert app.tree.set("0", "start") == "12:00:00"
+    from .selection import date_and_time
+    app.refresh_rows()
+    assert (app.tree.set("0", "date"), app.tree.set("0", "start")) == date_and_time(scan.videos[0].clock.utc(0))
+    assert app.tree.heading("start", "text").startswith("Start (local)")
     assert app.tree.set("0", "lap") == "—"  # The practice data has no start line.
     assert app.tree.heading("lap", "text") == "Best in file"
     assert not app.tree.item("0", "image")

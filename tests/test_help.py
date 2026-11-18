@@ -80,12 +80,15 @@ class HelpActionTests(unittest.TestCase):
 
     def test_completed_tools_download_resumes_requested_action_on_ui_thread(self):
         app = self.app(); after = Mock()
+        app.folder = Mock()
+        app.folder.get.return_value = ""
         with patch("goprovbox.gui.tools_ready", return_value=False), patch("goprovbox.gui.messagebox.askokcancel", return_value=True), patch("goprovbox.gui.download_tools") as download:
             app.setup_tools(after)
             app.worker.call_args.args[0]()
         download.assert_called_once(); after.assert_not_called()
         app.events.put(("idle", None)); app.poll()
         app.root.after.assert_any_call(0, after)
+        app.status.set.assert_called_with("Video tools ready. Choose the VBOX runs folder to start.")
 
 
 if __name__ == "__main__":

@@ -3,9 +3,6 @@ from datetime import datetime, timezone
 import math
 
 
-TIME_BASES = ("Local time", "UTC")
-
-
 def recording_datetime(stamp, basis="Local time", local_zone=None):
     value = datetime.fromtimestamp(stamp, timezone.utc)
     return value if basis == "UTC" else value.astimezone(local_zone)
@@ -60,8 +57,6 @@ def recording_details(video_name, info, basis="Local time"):
                   f"  Complete laps in this file: {info['complete_laps']}"]
     elif info["runs"]:
         lines += ["", "No complete lap in this file: " + info.get("unavailable_reason", "Lap timing unavailable.")]
-    lines += ["", "The red ★ separately marks footage from a VBOX run's fastest lap.",
-              "If that lap spans files, keep all listed files for the complete lap."]
     if not info["runs"]:
         lines += ["", "No matching VBOX run."]
     for run in info["runs"]:
@@ -75,7 +70,7 @@ def recording_details(video_name, info, basis="Local time"):
             chapters = run["fastest_lap_videos"]
             lines.append("  Whole-run fastest-lap footage: " + (", ".join(chapters) if chapters else "No matching GoPro footage"))
             if run["contains_fastest"]:
-                lines.append("  Red ★: this video contains footage from the whole-run best lap.")
+                lines.append("  This video includes footage from the whole-run best lap.")
                 if info["utc_start"] > best["utc_start"] or info["utc_end"] < best["utc_end"]:
                     lines.append("  This video contains only part of that lap.")
         else:

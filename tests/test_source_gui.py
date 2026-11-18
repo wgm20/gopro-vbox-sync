@@ -33,6 +33,33 @@ class SourcePickerTests(unittest.TestCase):
         self.addCleanup(app.temporary.cleanup)
         return app
 
+    def test_empty_inputs_show_examples_and_keep_hints_out_of_paths_and_preferences(self):
+        self.settings.write_text(json.dumps({"welcomed": True}))
+        app = self.app()
+        self.root.deiconify()
+        app.overlay_mode.set("Driving data"); app.overlay_changed()
+        app.scan_button.focus_force(); self.root.update()
+        for entry, hint in ((app.source_entry, ".vbo"), (app.gopro_entry, ".MP4"), (app.scene_entry, ".VVHSN")):
+            self.assertEqual(entry.get(), "")
+            self.assertIn(hint, entry.hint.cget("text"))
+            self.assertTrue(entry.hint.winfo_ismapped())
+        self.assertIn("built-in", app.scene_entry.hint.cget("text"))
+        self.assertIn("VBOX runs folder", app.status.get())
+        app.source_entry.event_generate("<FocusIn>"); self.root.update_idletasks()
+        self.assertFalse(app.source_entry.hint.winfo_ismapped())
+        app.source_entry.insert(0, str(self.vbox))
+        app.gopro_entry.focus_force(); self.root.update()
+        self.assertFalse(app.source_entry.hint.winfo_ismapped())
+        self.assertEqual(app.gopro_entry.get(), str(self.vbox))
+        self.assertIn("Click Scan for matches", app.status.get())
+        app.overlay_mode.set("Full scene · no rear camera"); app.overlay_changed()
+        self.assertNotIn("blank", app.scene_entry.hint.cget("text"))
+        self.assertIn(".gvscene", app.scene_entry.hint.cget("text"))
+        app.save_preferences()
+        prefs = json.loads(app.preferences.read_text())
+        self.assertEqual(prefs["scene_path"], "")
+        self.assertNotIn("time_basis", prefs)
+
     def test_legacy_settings_keep_shared_folder_and_recursive_card_default(self):
         self.settings.write_text(json.dumps({"welcomed": True, "folder": str(self.vbox),
                                              "recursive_gopro": False}))
@@ -133,8 +160,7 @@ class SourcePickerTests(unittest.TestCase):
                 app.overlay_changed()
                 app.crop_note.set("VBOX 16:9 · no crop")
                 app.run_detail.set("Recorded 30 Oct 2026, 09:20:10\n"
-                                   "Run best 1:02.440 · VBOX0001.vbo\n"
-                                   "★ This clip has fastest-lap footage")
+                                   "Best in file 1:02.440 · VBOX0001.vbo")
                 heading = "Export preview · 1920 × 1080"
                 if not full_scene:
                     heading += "\nSpeed · Lap time · RPM · Throttle · Brake"
@@ -201,8 +227,7 @@ class SourcePickerTests(unittest.TestCase):
         app.set_busy(True)
         self.assertTrue(app.options_button.instate(["!disabled"]))
         self.assertEqual(app.options_menu.entrycget("Include GoPro subfolders", "state"), "disabled")
-        for label in ("Details…", "What do red stars mean?…"):
-            self.assertEqual(app.options_menu.entrycget(label, "state"), "normal")
+        self.assertEqual(app.options_menu.entrycget("Details…", "state"), "normal")
         app.options_menu.invoke("Include GoPro subfolders")
         self.assertFalse(app.recursive_gopro.get())
         app.set_busy(False)

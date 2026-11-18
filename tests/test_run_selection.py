@@ -1,4 +1,5 @@
 """Selection dates, lap markers and sorting help choose work before encoding."""
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -73,39 +74,35 @@ class RunSelectionTests(unittest.TestCase):
 
     def test_default_rows_are_chronological_and_use_camera_start_not_vbox_start(self):
         self.assertEqual(self.app.tree.get_children(), ('1', '2', '0'))
-        self.assertEqual(self.app.tree.set('1', 'date'), '2026-07-10')
-        self.assertEqual(self.app.tree.set('1', 'start'), '11:59:50')
-        self.assertEqual(self.app.tree.set('2', 'start'), '12:00:25')
+        for i in (1, 2):
+            row = str(i)
+            self.assertEqual((self.app.tree.set(row, 'date'), self.app.tree.set(row, 'start')),
+                             date_and_time(self.clips[i].clock.utc(0)))
+        self.assertTrue(self.app.tree.heading('start', 'text').startswith('Start (local)'))
+        self.assertFalse(hasattr(self.app, 'time_combo'))
         self.app.tree.selection_set('1')
         self.assertIs(self.app.selected_video(), self.clips[1])
 
-    def test_best_in_file_uses_only_its_complete_laps_and_star_is_separate(self):
+    def test_best_in_file_uses_only_its_complete_laps_without_a_marker_column(self):
         self.assertEqual(self.app.tree.heading('lap', 'text'), 'Best in file')
         self.assertEqual(self.app.tree.set('1', 'lap'), '0:20.000')
         self.assertEqual(self.app.tree.set('2', 'lap'), '0:18.000')
         self.assertEqual(self.app.tree.set('0', 'lap'), '—')
-        self.assertFalse(self.app.tree.item('1', 'image'))
-        self.assertTrue(self.app.tree.item('2', 'image'))
-        self.assertFalse(self.app.tree.item('0', 'image'))
-        marker = self.app.tree.item('2', 'image')[0]
-        width = self.root.tk.call('image', 'width', marker)
-        height = self.root.tk.call('image', 'height', marker)
-        red, green, blue = self.root.tk.call(marker, 'get', width // 2, height // 2)
-        self.assertGreater(red, green * 2)
-        self.assertGreater(red, blue * 2)
+        self.assertEqual(tuple(map(str, self.app.tree.cget('show'))), ('headings',))
+        for row in self.app.tree.get_children():
+            self.assertFalse(self.app.tree.item(row, 'image'))
+            self.assertFalse(self.app.tree.item(row, 'tags'))
         details = recording_details('first.MP4', self.app.selection_data['1'], 'UTC')
         self.assertIn('Best in file: 0:20.000', details)
         self.assertIn('Whole-run best: 0:18.000', details)
         self.assertIn('second.MP4', details)
         self.assertIn('2026-07-10 11:59:50 (UTC)', details)
 
-    def test_split_run_best_marks_both_parts_without_counting_it_as_complete_in_either(self):
+    def test_split_run_best_is_explained_in_details_without_counting_it_as_complete_in_either(self):
         self.assign_scan([video(self.folder / 'first.MP4', BASE, 34),
                           video(self.folder / 'second.MP4', BASE + 34, 23)])
         self.assertEqual(self.app.tree.set('0', 'lap'), '0:20.000')
         self.assertEqual(self.app.tree.set('1', 'lap'), '—')
-        self.assertTrue(self.app.tree.item('0', 'image'))
-        self.assertTrue(self.app.tree.item('1', 'image'))
         for index, clip in enumerate(self.clips):
             info = self.app.selection_data[str(index)]
             self.assertTrue(info['contains_fastest'])
@@ -122,9 +119,7 @@ class RunSelectionTests(unittest.TestCase):
         original_markers = {row: self.app.tree.item(row, 'image') for row in self.app.tree.get_children()}
         with patch('goprovbox.gui.scan_folder') as scan, patch('goprovbox.gui.export') as encode, \
                 patch.object(self.app, 'worker') as worker:
-            self.app.time_basis.set('Local time')
             self.app.sort_rows('video')
-            self.app.time_basis.set('UTC')
             scan.assert_not_called(); encode.assert_not_called(); worker.assert_not_called()
         self.assertEqual(self.app.included_videos, original)
         self.assertEqual(self.app.tree.selection(), ('2',))
@@ -194,6 +189,50 @@ class RunSelectionTests(unittest.TestCase):
         app.set_busy(True)
         self.assertTrue(app.range_combo.instate(["disabled"]))
 
+    def test_scan_ticks_fastest_filmed_lap_across_runs_and_changes_with_export_choice(self):
+        # The fastest lap spans two adjacent chapters. The slower run uses a separate recording.
+        a, b = video(self.folder / 'GX010001.MP4', BASE, 34), video(self.folder / 'GX020001.MP4', BASE + 34, 23)
+        other = video(self.folder / 'GX010002.MP4', BASE + 90, 80)
+        self.assign_scan([a, b])
+        slower = replace(self.vbo, path=self.folder / 'slower.vbo',
+                         rows=[Row(BASE + 90 + (r.utc - BASE) * 1.3, r.values.copy()) for r in self.vbo.rows])
+        scan = self.app.scan
+        scan.videos = [a, b, other]
+        scan.vbos = [self.vbo, slower]
+        scan.matches.append(Match(slower, other, slower.rows, 0, 0))
+        scan.run_info.update(collect_run_info([slower]))
+        self.app.events.put(('scan', scan)); self.app.poll()
+        self.assertEqual(self.app.included_videos, {a.path.name, b.path.name})
+        self.assertEqual(self.app.tree.set('2', 'include'), '☐')
+        self.assertAlmostEqual(self.app.active_lap.duration, 18)
+        alternate = next(label for label, lap in self.app.lap_choices.items() if lap.run == slower.path.name)
+        self.app.range_label.set(alternate); self.app.change_range()
+        self.assertEqual(self.app.included_videos, {other.path.name})
+        self.assertEqual(self.app.tree.set('2', 'include'), '☑')
+        self.app.range_label.set('All matched footage'); self.app.change_range()
+        self.assertEqual(self.app.included_videos, {a.path.name, b.path.name, other.path.name})
+        self.app.toggle_include('1')
+        self.app.range_label.set('Fastest filmed lap'); self.app.change_range()
+        self.assertEqual(self.app.included_videos, {a.path.name, other.path.name})
+        self.assertEqual(self.app.active_lap.spans()[0].video, a.path.name)
+
+    def test_lap_key_survives_excluding_chapters_before_the_lap(self):
+        from goprovbox.lapexport import filmed_laps
+        first = video(self.folder / 'GX010001.MP4', BASE, 25)
+        second = video(self.folder / 'GX020001.MP4', BASE + 25, 32)
+        self.assign_scan([first, second])
+        self.app.events.put(('scan', self.app.scan)); self.app.poll()
+        self.assertEqual(self.app.included_videos, {second.path.name})
+        self.assertEqual(self.app.active_lap.key, filmed_laps(self.app.scan, {second.path.name})[0].key)
+        self.app.lap_padding.set(2); self.app.range_changed()
+        self.assertEqual(self.app.included_videos, {first.path.name, second.path.name})
+
+    def test_scan_without_a_filmed_lap_selects_matched_footage(self):
+        self.app.scan.run_info[self.vbo.path.name]['laps'] = []
+        self.app.events.put(('scan', self.app.scan)); self.app.poll()
+        self.assertEqual(self.app.included_videos, {v.path.name for v in self.clips})
+        self.assertIn('No complete filmed lap', self.app.summary.get())
+
     def test_table_is_scrollable_at_minimum_size_and_new_controls_fit(self):
         self.root.deiconify(); self.root.geometry('880x740'); self.root.update()
         self.assertTrue(self.app.tree.cget('xscrollcommand'))
@@ -203,7 +242,7 @@ class RunSelectionTests(unittest.TestCase):
                             (self.app.stop, self.app.open_report), (self.app.open_report, self.app.open_result)):
             self.assertLessEqual(left.winfo_rootx() + left.winfo_width(), right.winfo_rootx())
             self.assertGreater(right.winfo_width(), 1)
-        for control in (self.app.time_combo, self.app.create, self.app.range_combo, self.app.open_result):
+        for control in (self.app.create, self.app.range_combo, self.app.open_result):
             self.assertLessEqual(control.winfo_rooty() + control.winfo_height(),
                                  self.root.winfo_rooty() + self.root.winfo_height())
 
@@ -216,7 +255,7 @@ class RunSelectionTests(unittest.TestCase):
         self.app.resize_preview(); self.root.update()
         for width, height in ((1320, 860), (880, 740)):
             self.root.geometry(f'{width}x{height}'); self.root.update()
-            for control in (self.app.create, self.app.open_result, self.app.time_combo):
+            for control in (self.app.create, self.app.open_result):
                 self.assertLessEqual(control.winfo_rooty() + control.winfo_height(),
                                      self.root.winfo_rooty() + self.root.winfo_height())
             self.assertLessEqual(self.app.preview_image.width(), self.app.preview_label.winfo_width())
